@@ -16,7 +16,7 @@ BEGIN
             VALUE "FileDescription", "Nexo AI Vision Launcher\0"
             VALUE "FileVersion", "@CUAJONE_VERSION_IDENTITY@\0"
             VALUE "ProductName", "Nexo AI Vision\0"
-            VALUE "ProductVersion", "@CUAJONE_VERSION_IDENTITY@\0"
+            @CUAJONE_PRODUCT_VERSION_VALUE@
             VALUE "OriginalFilename", "NexoAIVisionLauncher.exe\0"
             VALUE "PrivateBuild", "@CUAJONE_VERSION_IDENTITY@\0"
         END

@@ -23,6 +23,8 @@ set(CUAJONE_PRODUCT_EXE "NexoAIVision")
 set(CUAJONE_PRODUCT_LAUNCHER_EXE "NexoAIVisionLauncher")
 set(CUAJONE_FILE_VERSION "" CACHE STRING
     "Launcher numeric version; must match installer -FileVersion. Empty means development build")
+set(CUAJONE_PRODUCT_VERSION "" CACHE STRING
+    "Launcher product label shown in About; may include a prerelease suffix")
 include(cmake/LauncherVersion.cmake)
 
 set(CUAJONE_RESVG_EXE
@@ -70,7 +72,8 @@ if(CUAJONE_BUILD_LAUNCHER)
         target_sources(cuajone_launcher_support PRIVATE src/launcher/launcher_version.cpp)
         target_link_libraries(cuajone_launcher_support PRIVATE version)
         set(launcher_version_resource "${CMAKE_CURRENT_BINARY_DIR}/launcher_version.rc")
-        cuajone_launcher_version("${CUAJONE_FILE_VERSION}" "${launcher_version_resource}")
+        cuajone_launcher_version("${CUAJONE_FILE_VERSION}" "${CUAJONE_PRODUCT_VERSION}"
+            "${launcher_version_resource}")
         add_executable(cuajone_launcher WIN32 src/launcher/launcher.cpp
             "${CUAJONE_PRODUCT_RESOURCE}" "${launcher_version_resource}")
         add_dependencies(cuajone_launcher cuajone_product_icon)
@@ -256,9 +259,15 @@ if(CUAJONE_BUILD_TESTS)
             "-DTEST_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/version-resource-tests"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/version_resource_tests.cmake")
         if(WIN32)
+            add_executable(cuajone_launcher_numeric_version_fixture
+                tests/version_resource_fixture.cpp tests/launcher_numeric_version_fixture.rc)
+            add_test(NAME cuajone_launcher_numeric_version_fixture
+                COMMAND cuajone_launcher_tests --numeric-fixture
+                    "$<TARGET_FILE:cuajone_launcher_numeric_version_fixture>")
             add_dependencies(cuajone_launcher_tests cuajone_launcher)
+            add_dependencies(cuajone_launcher_tests cuajone_launcher_numeric_version_fixture)
             add_test(NAME cuajone_built_launcher_version COMMAND cuajone_launcher_tests
-                --launcher-version "$<TARGET_FILE:cuajone_launcher>" "${CUAJONE_VERSION_IDENTITY}")
+                --launcher-version "$<TARGET_FILE:cuajone_launcher>" "${CUAJONE_VERSION_DISPLAY}")
             add_test(NAME cuajone_installer_version_policy COMMAND powershell -NoProfile
                 -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_SOURCE_DIR}/../installer/native/test-version-policy.ps1"
                 -LauncherExecutable "$<TARGET_FILE:cuajone_launcher>" -ExpectedVersion "${CUAJONE_VERSION_IDENTITY}")

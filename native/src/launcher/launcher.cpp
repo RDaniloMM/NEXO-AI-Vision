@@ -258,7 +258,7 @@ void showLauncherMenu(LauncherWindow& state) {
     if (selected == AboutMenu) {
         const auto version = runningLauncherVersion();
         const std::wstring text = (state.spanish
-            ? L"Versión del ejecutable del lanzador: " : L"Launcher executable version: ")
+            ? L"Versión del lanzador/producto: " : L"Launcher/product version: ")
             + version.value_or(state.spanish ? L"No disponible (sin recurso de versión legible)"
                 : L"Unavailable (no readable version resource)");
         MessageBoxW(state.window, text.c_str(),

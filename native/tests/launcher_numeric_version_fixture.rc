@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Test-only resource with no ProductVersion string.
 #include <winver.h>
 
-// Test-only version deliberately differs from product and installer versions.
 1 VERSIONINFO
-FILEVERSION 7,8,9,10
-PRODUCTVERSION 1,2,3,4
+FILEVERSION 11,22,33,44
+PRODUCTVERSION 11,22,33,44
 FILETYPE VFT_APP
 BEGIN
     BLOCK "StringFileInfo"
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "ProductVersion", "0.1.0-internal.35\0"
+            VALUE "FileDescription", "Numeric version fixture\0"
         END
     END
     BLOCK "VarFileInfo"

@@ -415,12 +415,17 @@ void testPerformanceArguments() {
 
 #ifdef _WIN32
 void testLauncherVersion() {
-    require(runningLauncherVersion() == std::optional<std::wstring>(L"7.8.9.10"),
-        "Running module file version did not match the resource (or used product version)");
+    require(runningLauncherVersion() == std::optional<std::wstring>(L"0.1.0-internal.35"),
+        "Running module did not prefer the ProductVersion resource string");
     TemporaryTree tree;
     require(!executableFileVersion(tree.root() / L"missing.exe"), "Missing executable invented a version");
     require(!executableFileVersion(tree.makeFile(L"stage-99.88.exe")),
         "Versionless file inferred a version from its name");
+}
+
+void testNumericVersionFixture(const std::filesystem::path& fixture) {
+    require(executableFileVersion(fixture) == std::optional<std::wstring>(L"11.22.33.44"),
+        "Numeric FileVersion fallback did not work when ProductVersion was absent");
 }
 #endif
 
@@ -428,6 +433,16 @@ void testLauncherVersion() {
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
+    if (argc == 3 && std::string_view(argv[1]) == "--numeric-fixture") {
+        try {
+            testNumericVersionFixture(argv[2]);
+            std::cout << "PASS: numeric FileVersion fallback\n";
+            return 0;
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            return 1;
+        }
+    }
     if (argc == 4 && std::string_view(argv[1]) == "--launcher-version") {
         try {
             const std::string expected(argv[3]);
