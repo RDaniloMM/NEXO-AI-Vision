@@ -671,6 +671,8 @@ Assert-Directory $ToolRoot "Native tool root"
 Assert-Directory $WixToolRoot "WiX tool root"
 Assert-File $ReleaseExecutable "Release executable"
 Assert-File $LauncherExecutable "Launcher executable"
+. (Join-Path $scriptRoot "version-policy.ps1")
+$msiVersion = Assert-LauncherBuildVersion -LauncherExecutable $LauncherExecutable -FileVersion $FileVersion
 Assert-File $HardwareProbeCustomAction "Hardware probe custom action"
 if ((Split-Path -Leaf $ReleaseExecutable) -cne "NexoAIVision.exe") {
     throw "ReleaseExecutable must identify NexoAIVision.exe"
@@ -741,11 +743,6 @@ if ($BuildMode -eq "Release") {
     }
 }
 
-$fileVersionParts = @($FileVersion.Split('.') | ForEach-Object { [int]$_ })
-if ($fileVersionParts[0] -gt 255 -or $fileVersionParts[1] -gt 255 -or $fileVersionParts[3] -gt 65535) {
-    throw "FileVersion cannot be mapped to the Windows Installer major.minor.build ranges"
-}
-$msiVersion = "{0}.{1}.{2}" -f $fileVersionParts[0], $fileVersionParts[1], $fileVersionParts[3]
 
 $dumpbin = Join-Path $ToolRoot "vs\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\dumpbin.exe"
 $wix = Join-Path $WixToolRoot "wix.exe"
@@ -836,7 +833,7 @@ $nativeRoot = Join-Path $projectRoot "native"
 $cmakeLists = Join-Path $nativeRoot "CMakeLists.txt"
 $allCpp = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot "src") -Recurse -File -Filter "*.cpp").FullName
 $allHeaders = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot "include") -Recurse -File -Include "*.hpp", "*.h").FullName
-$launcherNames = @("launcher.cpp", "launcher_support.cpp", "launcher_support.hpp")
+$launcherNames = @("launcher.cpp", "launcher_support.cpp", "launcher_support.hpp", "launcher_version.cpp", "launcher_version.hpp")
 $probeNames = @("compute.cpp", "installer_custom_action.cpp", "compute.hpp")
 $freshnessByBinary = @{
     $ReleaseExecutable = @($cmakeLists) + @(
@@ -848,7 +845,10 @@ $freshnessByBinary = @{
             (Split-Path -Leaf $_) -ne "launcher_support.hpp"
         }
     )
-    $LauncherExecutable = @($cmakeLists) + @(
+    $LauncherExecutable = @($cmakeLists,
+        (Join-Path $nativeRoot "cmake\LauncherVersion.cmake"),
+        (Join-Path $nativeRoot "resources\launcher_version.rc.in"),
+        (Join-Path $nativeRoot "resources\launcher.rc.in")) + @(
         $allCpp + $allHeaders | Where-Object {
             (Split-Path -Leaf $_) -in $launcherNames
         }

@@ -21,6 +21,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # native/src/launcher/launcher.cpp (kRuntimeExecutable).
 set(CUAJONE_PRODUCT_EXE "NexoAIVision")
 set(CUAJONE_PRODUCT_LAUNCHER_EXE "NexoAIVisionLauncher")
+set(CUAJONE_FILE_VERSION "" CACHE STRING
+    "Launcher numeric version; must match installer -FileVersion. Empty means development build")
+include(cmake/LauncherVersion.cmake)
 
 set(CUAJONE_RESVG_EXE
     "${CMAKE_CURRENT_SOURCE_DIR}/../.tools/native/dependencies/resvg-0.47.0/resvg.exe"
@@ -64,7 +67,12 @@ if(CUAJONE_BUILD_LAUNCHER)
     endif()
 
     if(WIN32)
-        add_executable(cuajone_launcher WIN32 src/launcher/launcher.cpp "${CUAJONE_PRODUCT_RESOURCE}")
+        target_sources(cuajone_launcher_support PRIVATE src/launcher/launcher_version.cpp)
+        target_link_libraries(cuajone_launcher_support PRIVATE version)
+        set(launcher_version_resource "${CMAKE_CURRENT_BINARY_DIR}/launcher_version.rc")
+        cuajone_launcher_version("${CUAJONE_FILE_VERSION}" "${launcher_version_resource}")
+        add_executable(cuajone_launcher WIN32 src/launcher/launcher.cpp
+            "${CUAJONE_PRODUCT_RESOURCE}" "${launcher_version_resource}")
         add_dependencies(cuajone_launcher cuajone_product_icon)
         target_link_libraries(cuajone_launcher PRIVATE
             cuajone_launcher_support advapi32 comctl32 dwmapi ole32 shell32)
@@ -236,11 +244,25 @@ if(CUAJONE_BUILD_TESTS)
     endif()
     if(CUAJONE_BUILD_LAUNCHER)
         add_executable(cuajone_launcher_tests tests/launcher_tests.cpp)
+        if(WIN32)
+            target_sources(cuajone_launcher_tests PRIVATE tests/launcher_version_fixture.rc)
+        endif()
         target_link_libraries(cuajone_launcher_tests PRIVATE cuajone_launcher_support)
         if(MSVC)
             target_compile_options(cuajone_launcher_tests PRIVATE /W4 /permissive- /EHsc)
         endif()
         add_test(NAME cuajone_launcher_tests COMMAND cuajone_launcher_tests)
+        add_test(NAME cuajone_version_resource_tests COMMAND "${CMAKE_COMMAND}"
+            "-DTEST_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/version-resource-tests"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/version_resource_tests.cmake")
+        if(WIN32)
+            add_dependencies(cuajone_launcher_tests cuajone_launcher)
+            add_test(NAME cuajone_built_launcher_version COMMAND cuajone_launcher_tests
+                --launcher-version "$<TARGET_FILE:cuajone_launcher>" "${CUAJONE_VERSION_IDENTITY}")
+            add_test(NAME cuajone_installer_version_policy COMMAND powershell -NoProfile
+                -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_SOURCE_DIR}/../installer/native/test-version-policy.ps1"
+                -LauncherExecutable "$<TARGET_FILE:cuajone_launcher>" -ExpectedVersion "${CUAJONE_VERSION_IDENTITY}")
+        endif()
     endif()
 endif()
 

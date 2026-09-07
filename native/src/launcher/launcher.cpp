@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #include "cuajone/launcher_support.hpp"
+#include "cuajone/launcher_version.hpp"
 
 #include <windows.h>
 #include <commctrl.h>
@@ -80,6 +81,10 @@ enum ControlId : int {
     SaveCameraButton,
     LoadCameraButton,
     DeleteCameraButton,
+    MenuButton,
+    PerformanceMenu = 400,
+    AboutMenu,
+    IntervalMenuBase = 410,
 };
 
 struct LocalizedText {
@@ -90,6 +95,9 @@ struct LocalizedText {
 
 struct LauncherWindow {
     HWND window{};
+    HWND menu_button{};
+    bool performance_report{};
+    int telemetry_interval_seconds{5};
     HWND source{};
     HWND source_label{};
     HWND saved_camera{};
@@ -214,6 +222,58 @@ void refreshLanguage(LauncherWindow& state) {
         state.dark
             ? (state.spanish ? L"Cambiar a tema claro" : L"Switch to light theme")
             : (state.spanish ? L"Cambiar a tema oscuro" : L"Switch to dark theme"));
+}
+
+void showLauncherMenu(LauncherWindow& state) {
+    HMENU menu = CreatePopupMenu();
+    HMENU intervals = CreatePopupMenu();
+    if (!menu || !intervals) {
+        if (menu) DestroyMenu(menu);
+        if (intervals) DestroyMenu(intervals);
+        throw std::runtime_error("Could not create launcher menu");
+    }
+    const UINT editable = state.process ? MF_GRAYED : MF_ENABLED;
+    AppendMenuW(menu, MF_STRING | editable | (state.performance_report ? MF_CHECKED : MF_UNCHECKED),
+        PerformanceMenu, state.spanish ? L"&Depuración de rendimiento" : L"&Performance debugging");
+    for (std::size_t index = 0; index < kTelemetryIntervals.size(); ++index) {
+        const auto seconds = kTelemetryIntervals[index];
+        const std::wstring label = std::to_wstring(seconds) + (state.spanish ? L" segundos" : L" seconds");
+        AppendMenuW(intervals, MF_STRING, IntervalMenuBase + index, label.c_str());
+        if (seconds == state.telemetry_interval_seconds) {
+            CheckMenuRadioItem(intervals, IntervalMenuBase,
+                IntervalMenuBase + static_cast<UINT>(kTelemetryIntervals.size()) - 1,
+                IntervalMenuBase + static_cast<UINT>(index), MF_BYCOMMAND);
+        }
+    }
+    AppendMenuW(menu, MF_POPUP | editable, reinterpret_cast<UINT_PTR>(intervals),
+        state.spanish ? L"&Intervalo de telemetría" : L"Telemetry &interval");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, AboutMenu,
+        state.spanish ? L"&Acerca de Nexo AI Vision" : L"&About Nexo AI Vision");
+    RECT anchor{};
+    GetWindowRect(state.menu_button, &anchor);
+    const UINT selected = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
+        anchor.left, anchor.bottom, state.window, nullptr);
+    DestroyMenu(menu);
+    if (selected == AboutMenu) {
+        const auto version = runningLauncherVersion();
+        const std::wstring text = (state.spanish
+            ? L"Versión del ejecutable del lanzador: " : L"Launcher executable version: ")
+            + version.value_or(state.spanish ? L"No disponible (sin recurso de versión legible)"
+                : L"Unavailable (no readable version resource)");
+        MessageBoxW(state.window, text.c_str(),
+            state.spanish ? L"Acerca de Nexo AI Vision" : L"About Nexo AI Vision", MB_OK | MB_ICONINFORMATION);
+    } else if (!state.process) {
+        if (selected == PerformanceMenu) state.performance_report = !state.performance_report;
+        else if (selected >= IntervalMenuBase && selected < IntervalMenuBase + kTelemetryIntervals.size()) {
+            state.telemetry_interval_seconds = kTelemetryIntervals[selected - IntervalMenuBase];
+        }
+        if (selected != 0) {
+            setStatus(state, state.spanish
+                ? L"Opciones para esta sesión. Iniciar captura; Validar solo comprueba la configuración."
+                : L"Session options. Start runs capture; Validate only checks configuration.");
+        }
+    }
 }
 
 std::wstring trim(std::wstring value) {
@@ -501,6 +561,10 @@ void drawButton(const LauncherWindow& state, const DRAWITEMSTRUCT& item) {
     wchar_t text[128]{};
     GetWindowTextW(item.hwndItem, text, static_cast<int>(std::size(text)));
     DrawTextW(item.hDC, text, -1, &content, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    if (id == MenuButton && (item.itemState & ODS_FOCUS) != 0) {
+        InflateRect(&content, -4, -4);
+        DrawFocusRect(item.hDC, &content);
+    }
 }
 
 std::filesystem::path knownProgramData() {
@@ -614,10 +678,13 @@ void createControls(LauncherWindow& state) {
     constexpr int edit_width = 620;
     constexpr int row_y = 80;
 
-    const HWND heading = createControl(state, 0, L"STATIC", kProductName, SS_LEFT, 16, 14, 400, 30, 0);
+    state.menu_button = createControl(state, 0, L"BUTTON", L"Menu v", WS_TABSTOP | BS_OWNERDRAW,
+        16, 18, 100, 30, MenuButton);
+    addLocalizedText(state, state.menu_button, L"Menu \u25be", L"Menú \u25be");
+    const HWND heading = createControl(state, 0, L"STATIC", kProductName, SS_LEFT, 130, 14, 400, 30, 0);
     SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(state.heading_font), TRUE);
     const HWND subtitle = createControl(
-        state, 0, L"STATIC", L"Camera analytics control center", SS_LEFT, 18, 46, 400, 20, 0);
+        state, 0, L"STATIC", L"Camera analytics control center", SS_LEFT, 132, 46, 400, 20, 0);
     addLocalizedText(state, subtitle, L"Camera analytics control center", L"Centro de control de analítica de cámaras");
     state.language = createControl(
         state, 0, L"BUTTON", L"Switch language to Spanish", WS_TABSTOP | BS_OWNERDRAW,
@@ -994,6 +1061,8 @@ std::filesystem::path pickVideoFile(HWND owner) {
 
 LauncherSettings readSettings(const LauncherWindow& state) {
     LauncherSettings settings;
+    settings.performance_report = state.performance_report;
+    settings.telemetry_interval_seconds = state.telemetry_interval_seconds;
     settings.source = editText(state.source);
     settings.output = editText(state.output);
     settings.analytics_mode = SendMessageW(state.analytics, CB_GETCURSEL, 0, 0) == 0
@@ -1404,7 +1473,8 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wparam, LPARA
                 break;
             case WM_COMMAND: {
                 const int id = LOWORD(wparam);
-                if (id == ValidateButton) launchRuntime(*state, true);
+                if (id == MenuButton) showLauncherMenu(*state);
+                else if (id == ValidateButton) launchRuntime(*state, true);
                 else if (id == OpenLogButton) {
                     const std::wstring path = editText(state->log_path);
                     if (!std::filesystem::is_regular_file(path)) {

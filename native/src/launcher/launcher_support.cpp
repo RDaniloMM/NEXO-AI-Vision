@@ -207,6 +207,10 @@ std::wstring formatPpeConfidenceThreshold(float value) {
 }
 
 LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
+    if (std::ranges::find(kTelemetryIntervals, settings.telemetry_interval_seconds)
+        == kTelemetryIntervals.end()) {
+        throw std::invalid_argument("Telemetry interval must be 1, 5, 10, 30, or 60 seconds");
+    }
     if (settings.source.empty()) {
         throw std::invalid_argument("Camera URL or video file is required");
     }
@@ -231,6 +235,9 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
     }
     for (const auto& [option, value] : settings.runtime_options) {
         static_cast<void>(value);
+        if (option == L"--performance-report" || option == L"--telemetry-interval-sec") {
+            throw std::invalid_argument("Use the launcher menu to configure performance debugging");
+        }
         if (option == L"--ppe-engine" || option == L"--pose-engine"
             || option == L"--ppe-onnx" || option == L"--pose-onnx"
             || option == L"--ppe-labels") {
@@ -317,6 +324,12 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
         }
     }
     if (settings.show_window) result.arguments.emplace_back(L"--show");
+    // Preflight accepts the same configuration but does not run capture.
+    if (settings.performance_report) {
+        result.arguments.emplace_back(L"--performance-report");
+        result.arguments.emplace_back(L"--telemetry-interval-sec");
+        result.arguments.push_back(std::to_wstring(settings.telemetry_interval_seconds));
+    }
     return result;
 }
 

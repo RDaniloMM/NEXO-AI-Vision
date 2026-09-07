@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+#include <winver.h>
+
+// Test-only version deliberately differs from product and installer versions.
+1 VERSIONINFO
+FILEVERSION 7,8,9,10
+PRODUCTVERSION 1,2,3,4
+FILETYPE VFT_APP
+BEGIN
+END

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #include "cuajone/launcher_support.hpp"
+#ifdef _WIN32
+#include "cuajone/launcher_version.hpp"
+#endif
 
 #include <chrono>
 #include <filesystem>
@@ -374,10 +377,82 @@ void testSavedCameraProfileNames() {
         "Saved camera credential target accepted an unsafe profile name");
 }
 
+void testPerformanceArguments() {
+    TemporaryTree tree;
+    auto settings = baseSettings(tree);
+    addTensorRtModels(settings, tree);
+    require(!settings.performance_report && settings.telemetry_interval_seconds == 5,
+        "Diagnostics defaults must be off and five seconds");
+    for (bool preflight : {false, true}) {
+        for (int interval : kTelemetryIntervals) {
+            settings.telemetry_interval_seconds = interval;
+            settings.performance_report = false;
+            const auto off = buildLaunchPlan(settings, preflight).arguments;
+            require(!contains(off, L"--performance-report") && !contains(off, L"--telemetry-interval-sec"),
+                "Disabled diagnostics emitted telemetry flags");
+            settings.performance_report = true;
+            const auto on = buildLaunchPlan(settings, preflight).arguments;
+            auto expected = off;
+            expected.insert(expected.end(), {L"--performance-report", L"--telemetry-interval-sec",
+                std::to_wstring(interval)});
+            require(on == expected, "Diagnostics must append exactly one standalone flag and interval pair");
+            require(contains(on, L"--preflight") == preflight, "Validate lost preflight semantics");
+        }
+        for (bool enabled : {false, true}) {
+            settings.performance_report = enabled;
+            for (int invalid : {-1, 0, 2, 61}) {
+                settings.telemetry_interval_seconds = invalid;
+                requireThrows([&] { buildLaunchPlan(settings, preflight); }, "Invalid menu interval accepted");
+            }
+        }
+    }
+    settings.telemetry_interval_seconds = 5;
+    for (const auto* flag : {L"--performance-report", L"--telemetry-interval-sec"}) {
+        settings.runtime_options = {{flag, L"1"}};
+        requireThrows([&] { buildLaunchPlan(settings, false); }, "Untyped diagnostics override accepted");
+    }
+}
+
+#ifdef _WIN32
+void testLauncherVersion() {
+    require(runningLauncherVersion() == std::optional<std::wstring>(L"7.8.9.10"),
+        "Running module file version did not match the resource (or used product version)");
+    TemporaryTree tree;
+    require(!executableFileVersion(tree.root() / L"missing.exe"), "Missing executable invented a version");
+    require(!executableFileVersion(tree.makeFile(L"stage-99.88.exe")),
+        "Versionless file inferred a version from its name");
+}
+#endif
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+#ifdef _WIN32
+    if (argc == 4 && std::string_view(argv[1]) == "--launcher-version") {
+        try {
+            const std::string expected(argv[3]);
+            const std::wstring wide_expected(expected.begin(), expected.end());
+            const std::filesystem::path launcher(argv[2]);
+            require(executableFileVersion(launcher) == wide_expected,
+                "Built launcher resource does not match the configured version");
+            TemporaryTree tree;
+            const auto relocated = tree.root() / L"stage-99.88.exe";
+            std::filesystem::copy_file(launcher, relocated);
+            require(executableFileVersion(relocated) == wide_expected,
+                "Relocating the launcher changed its resource identity");
+            std::cout << "PASS: built and relocated launcher version " << expected << '\n';
+            return 0;
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            return 1;
+        }
+    }
+#endif
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
+        {"performance debugging arguments", testPerformanceArguments},
+#ifdef _WIN32
+        {"launcher executable version resources", testLauncherVersion},
+#endif
         {"camera or video source requirement", testCameraOrVideoSourceIsRequired},
         {"launcher model matrix and arguments", testModelMatrixAndArguments},
         {"PPE-only pose omission", testPpeOnlyOmitsPoseArguments},

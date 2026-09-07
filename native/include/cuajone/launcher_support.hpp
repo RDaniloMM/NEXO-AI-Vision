@@ -58,6 +58,9 @@ struct ManagedModelSet {
 };
 
 struct LauncherSettings {
+    // Session-only diagnostics; operator preference schema remains unchanged.
+    bool performance_report{};
+    int telemetry_interval_seconds{5};
     std::wstring source;
     std::filesystem::path output;
     AnalyticsMode analytics_mode{AnalyticsMode::PpeFall};
@@ -84,6 +87,7 @@ ManagedModelSet resolveManagedModelSet(
     const std::filesystem::path& root,
     bool pose_required);
 LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight);
+inline constexpr std::array<int, 5> kTelemetryIntervals{1, 5, 10, 30, 60};
 float parsePpeConfidenceThreshold(std::wstring_view text);
 std::wstring formatPpeConfidenceThreshold(float value);
 OperatorPreferences parseOperatorPreferences(std::string_view text);
