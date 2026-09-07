@@ -46,6 +46,7 @@ __pycache__/
 
 # Reports, evidence, and Office temporary files
 /Evidencias/
+/artifacts/benchmarks/
 *.csv
 *.xlsx
 ~$*

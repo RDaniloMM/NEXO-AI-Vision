@@ -324,6 +324,25 @@ el CLI local fijado. `Package.wxs` define identidad, `UpgradeCode`, UI, carpetas
 ACL y accesos. El script genera `Payload.wxs` en D con un componente y GUID
 determinista por ruta staged; ese archivo no se versiona.
 
+### Bootstrap reproducible
+
+El repositorio versiona los scripts, versiones y verificaciones de integridad;
+no versiona instaladores, ejecutables, SDKs, modelos ni caches locales. Después de
+instalar el .NET SDK, prepara el WiX local con:
+
+```powershell
+.\installer\native\Provision-Wix.ps1
+```
+
+El script instala exactamente WiX 6.0.2 bajo `.tools\native\wix`, añade las
+extensiones `WixToolset.UI.wixext` y `WixToolset.Util.wixext` en la misma cache
+local y verifica sus versiones. Para el runtime nativo, desde `native/` ejecuta
+también `Provision-TrackingDependencies.ps1` y `Provision-Resvg.ps1`; ambos
+descargan fuentes o herramientas fijadas y verifican SHA-256. Visual Studio,
+CMake, Ninja, OpenCV, CUDA y TensorRT siguen siendo prerrequisitos externos:
+deben instalarse u obtenerse mediante sus canales autorizados antes de activar el
+toolchain con `activate-native.ps1`.
+
 ## 10. Verificar sin instalar
 
 `test-installer.ps1` no instala ni desinstala el producto. Realiza:

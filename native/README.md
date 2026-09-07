@@ -19,8 +19,11 @@ enlaza `cuajone_runtime`, OpenCV, ONNX Runtime, CUDA ni TensorRT.
 ## Ruta rápida
 
 1. Prepara `.tools\native` con las herramientas y SDK indicados en Prerrequisitos.
-2. Ejecuta `./native/Provision-TrackingDependencies.ps1` para verificar las fuentes de tracking.
-3. Define `ONNXRUNTIME_ROOT`, `TENSORRT_ROOT` y `OpenCV_DIR` sin copiar binarios al repositorio.
+2. Ejecuta `./installer/native/Provision-Wix.ps1` para fijar el CLI WiX local que
+   construye el MSI, y `./native/Provision-TrackingDependencies.ps1` para verificar
+   las fuentes de tracking.
+3. Ejecuta `./native/Provision-Resvg.ps1` para la herramienta de iconos y define
+   `ONNXRUNTIME_ROOT`, `TENSORRT_ROOT` y `OpenCV_DIR` sin copiar binarios al repositorio.
 4. Compila y ejecuta primero `cpu-tests`.
 5. Compila `windows-msvc` y ejecuta `--preflight` con engines compatibles.
 6. Recién después realiza una prueba controlada con un video autorizado.
