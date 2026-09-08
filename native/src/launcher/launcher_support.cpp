@@ -110,6 +110,79 @@ bool hasNonWhitespace(std::wstring_view value) {
     });
 }
 
+bool equalsAsciiCaseInsensitive(std::wstring_view left, std::wstring_view right) {
+    return left.size() == right.size()
+        && std::equal(left.begin(), left.end(), right.begin(), [](wchar_t lhs, wchar_t rhs) {
+            return std::towlower(lhs) == std::towlower(rhs);
+        });
+}
+
+void validateStreamSettings(std::wstring_view resolution, int fps) {
+    if (std::ranges::find(kStreamResolutions, resolution) == kStreamResolutions.end()) {
+        throw std::invalid_argument("Select a supported stream resolution");
+    }
+    if (std::ranges::find(kStreamFrameRates, fps) == kStreamFrameRates.end()) {
+        throw std::invalid_argument("Select a supported stream frame rate");
+    }
+}
+
+std::wstring upsertQueryParameter(
+    std::wstring_view source,
+    std::wstring_view parameter,
+    std::wstring_view value) {
+    const std::size_t fragment_start = source.find(L'#');
+    const std::wstring_view fragment = fragment_start == std::wstring_view::npos
+        ? std::wstring_view{} : source.substr(fragment_start);
+    const std::wstring_view without_fragment = fragment_start == std::wstring_view::npos
+        ? source : source.substr(0, fragment_start);
+    const std::size_t query_start = without_fragment.find(L'?');
+    const std::wstring_view base = query_start == std::wstring_view::npos
+        ? without_fragment : without_fragment.substr(0, query_start);
+    const std::wstring_view query = query_start == std::wstring_view::npos
+        ? std::wstring_view{} : without_fragment.substr(query_start + 1);
+
+    std::vector<std::wstring> entries;
+    bool replaced = false;
+    std::size_t start = 0;
+    while (start <= query.size()) {
+        const std::size_t end = query.find(L'&', start);
+        const std::wstring_view entry = query.substr(
+            start, end == std::wstring_view::npos ? query.size() - start : end - start);
+        if (!entry.empty()) {
+            const std::size_t equals = entry.find(L'=');
+            const std::wstring_view name = entry.substr(0, equals);
+            if (equalsAsciiCaseInsensitive(name, parameter)) {
+                if (!replaced) {
+                    entries.emplace_back(std::wstring(parameter) + L'=' + std::wstring(value));
+                    replaced = true;
+                }
+            } else {
+                entries.emplace_back(entry);
+            }
+        }
+        if (end == std::wstring_view::npos) break;
+        start = end + 1;
+    }
+    if (!replaced) entries.emplace_back(std::wstring(parameter) + L'=' + std::wstring(value));
+
+    std::wstring result(base);
+    result.push_back(L'?');
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        if (index != 0) result.push_back(L'&');
+        result += entries[index];
+    }
+    result += fragment;
+    return result;
+}
+
+std::wstring configuredRtspSource(
+    std::wstring_view source,
+    std::wstring_view resolution,
+    int fps) {
+    std::wstring result = upsertQueryParameter(source, L"resolution", resolution);
+    return upsertQueryParameter(result, L"fps", std::to_wstring(fps));
+}
+
 std::string utf8FromWide(std::wstring_view value) {
     if (value.empty()) return {};
     const int required = WideCharToMultiByte(
@@ -211,6 +284,7 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
         == kTelemetryIntervals.end()) {
         throw std::invalid_argument("Telemetry interval must be 1, 5, 10, 30, or 60 seconds");
     }
+    validateStreamSettings(settings.stream_resolution, settings.stream_fps);
     if (settings.source.empty()) {
         throw std::invalid_argument("Camera URL or video file is required");
     }
@@ -237,6 +311,9 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
         static_cast<void>(value);
         if (option == L"--performance-report" || option == L"--telemetry-interval-sec") {
             throw std::invalid_argument("Use the launcher menu to configure performance debugging");
+        }
+        if (option == L"--rtsp-transport" || option == L"--video-acceleration") {
+            throw std::invalid_argument("Use the launcher controls to configure RTSP transport and video decoding");
         }
         if (option == L"--ppe-engine" || option == L"--pose-engine"
             || option == L"--ppe-onnx" || option == L"--pose-onnx"
@@ -275,7 +352,9 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
     result.has_cpu_candidate = cpu_candidate;
     if (preflight) result.arguments.emplace_back(L"--preflight");
     result.arguments.emplace_back(L"--source");
-    result.arguments.push_back(settings.source);
+    result.arguments.push_back(isRtspSource(settings.source)
+        ? configuredRtspSource(settings.source, settings.stream_resolution, settings.stream_fps)
+        : settings.source);
     if (hasNonWhitespace(settings.source_label)) {
         result.arguments.emplace_back(L"--source-label");
         result.arguments.push_back(settings.source_label);
@@ -288,6 +367,18 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
         case ComputeMode::Auto: result.arguments.emplace_back(L"auto"); break;
         case ComputeMode::Cuda: result.arguments.emplace_back(L"cuda"); break;
         case ComputeMode::Cpu: result.arguments.emplace_back(L"cpu"); break;
+    }
+    result.arguments.emplace_back(L"--rtsp-transport");
+    switch (settings.rtsp_transport) {
+        case RtspTransport::Default: result.arguments.emplace_back(L"default"); break;
+        case RtspTransport::Tcp: result.arguments.emplace_back(L"tcp"); break;
+        case RtspTransport::Udp: result.arguments.emplace_back(L"udp"); break;
+    }
+    result.arguments.emplace_back(L"--video-acceleration");
+    switch (settings.video_acceleration) {
+        case VideoAcceleration::Auto: result.arguments.emplace_back(L"auto"); break;
+        case VideoAcceleration::D3d11: result.arguments.emplace_back(L"d3d11"); break;
+        case VideoAcceleration::Cpu: result.arguments.emplace_back(L"cpu"); break;
     }
     result.arguments.emplace_back(L"--imgsz");
     result.arguments.push_back(std::to_wstring(settings.image_size));
@@ -346,11 +437,17 @@ OperatorPreferences parseOperatorPreferences(std::string_view text) {
             throw std::invalid_argument("Preferences contain an invalid or duplicate entry");
         }
     }
-    if ((values.size() != 5 && values.size() != 6 && values.size() != 7) || !values.contains("schema_version")
+    static constexpr std::array<std::string_view, 11> supported_keys{
+        "schema_version", "language", "theme", "imgsz", "ppe_class_conf",
+        "show_window", "ppe_enabled", "rtsp_transport", "video_acceleration",
+        "stream_resolution", "stream_fps",
+    };
+    const bool has_unsupported_key = std::ranges::any_of(values, [](const auto& entry) {
+        return std::ranges::find(supported_keys, entry.first) == supported_keys.end();
+    });
+    if (has_unsupported_key || !values.contains("schema_version")
         || !values.contains("language") || !values.contains("theme")
-        || !values.contains("imgsz") || !values.contains("ppe_class_conf")
-        || (values.size() >= 6 && !values.contains("show_window"))
-        || (values.size() == 7 && !values.contains("ppe_enabled"))) {
+        || !values.contains("imgsz") || !values.contains("ppe_class_conf")) {
         throw std::invalid_argument("Preferences contain missing or unsupported entries");
     }
     OperatorPreferences result;
@@ -403,20 +500,43 @@ OperatorPreferences parseOperatorPreferences(std::string_view text) {
     }
     if (const auto enabled = values.find("ppe_enabled"); enabled != values.end()) {
         std::istringstream switches(enabled->second);
-        std::string entry;
+        std::string switch_entry;
         constexpr std::array<std::size_t, kPpeItemCount> item_class_ids{0, 2, 3, 4, 5, 6, 7};
-        for (std::size_t index = 0; index < item_class_ids.size(); ++index) {
-            const std::size_t class_id = item_class_ids[index];
-            if (!std::getline(switches, entry, ',')) throw std::invalid_argument("Preferences PPE switches are incomplete");
-            const auto separator = entry.find(':');
-            if (separator == std::string::npos || entry.substr(0, separator) != kPpeOutputLabels[class_id]
-                || (entry.substr(separator + 1) != "0" && entry.substr(separator + 1) != "1")) {
+        for (std::size_t switch_index = 0; switch_index < item_class_ids.size(); ++switch_index) {
+            const std::size_t class_id = item_class_ids[switch_index];
+            if (!std::getline(switches, switch_entry, ',')) throw std::invalid_argument("Preferences PPE switches are incomplete");
+            const auto separator = switch_entry.find(':');
+            if (separator == std::string::npos || switch_entry.substr(0, separator) != kPpeOutputLabels[class_id]
+                || (switch_entry.substr(separator + 1) != "0" && switch_entry.substr(separator + 1) != "1")) {
                 throw std::invalid_argument("Preferences PPE switch order or value is invalid");
             }
-            result.ppe_enabled[index] = entry.substr(separator + 1) == "1";
+            result.ppe_enabled[switch_index] = switch_entry.substr(separator + 1) == "1";
         }
-        if (std::getline(switches, entry, ',')) throw std::invalid_argument("Preferences PPE switches are excessive");
+        if (std::getline(switches, switch_entry, ',')) throw std::invalid_argument("Preferences PPE switches are excessive");
     }
+    if (const auto transport = values.find("rtsp_transport"); transport != values.end()) {
+        if (transport->second == "default") result.rtsp_transport = RtspTransport::Default;
+        else if (transport->second == "tcp") result.rtsp_transport = RtspTransport::Tcp;
+        else if (transport->second == "udp") result.rtsp_transport = RtspTransport::Udp;
+        else throw std::invalid_argument("Preferences rtsp_transport must be default, tcp, or udp");
+    }
+    if (const auto acceleration = values.find("video_acceleration"); acceleration != values.end()) {
+        if (acceleration->second == "auto") result.video_acceleration = VideoAcceleration::Auto;
+        else if (acceleration->second == "d3d11") result.video_acceleration = VideoAcceleration::D3d11;
+        else if (acceleration->second == "cpu") result.video_acceleration = VideoAcceleration::Cpu;
+        else throw std::invalid_argument("Preferences video_acceleration must be auto, d3d11, or cpu");
+    }
+    if (const auto resolution = values.find("stream_resolution"); resolution != values.end()) {
+        result.stream_resolution = wideFromUtf8(resolution->second);
+    }
+    if (const auto fps = values.find("stream_fps"); fps != values.end()) {
+        const auto parsed = std::from_chars(
+            fps->second.data(), fps->second.data() + fps->second.size(), result.stream_fps);
+        if (parsed.ec != std::errc{} || parsed.ptr != fps->second.data() + fps->second.size()) {
+            throw std::invalid_argument("Preferences stream_fps is invalid");
+        }
+    }
+    validateStreamSettings(result.stream_resolution, result.stream_fps);
     return result;
 }
 
@@ -426,19 +546,29 @@ std::string serializeOperatorPreferences(const OperatorPreferences& preferences)
     }
     validateImageSize(preferences.image_size);
     validatePpeClassConfidences(preferences.ppe_class_confidences);
+    validateStreamSettings(preferences.stream_resolution, preferences.stream_fps);
     std::ostringstream output;
     output << "schema_version=1\n"
            << "language=" << (preferences.language == UiLanguage::Spanish ? "es" : "en") << '\n'
            << "theme=" << (preferences.theme == ThemeMode::Dark ? "dark" : "light") << '\n'
            << "imgsz=" << preferences.image_size << '\n'
            << "show_window=" << (preferences.show_window ? "1" : "0") << '\n'
+           << "rtsp_transport="
+           << (preferences.rtsp_transport == RtspTransport::Tcp ? "tcp"
+               : preferences.rtsp_transport == RtspTransport::Udp ? "udp" : "default") << '\n'
+           << "video_acceleration="
+           << (preferences.video_acceleration == VideoAcceleration::D3d11 ? "d3d11"
+               : preferences.video_acceleration == VideoAcceleration::Cpu ? "cpu" : "auto") << '\n'
+           << "stream_resolution="
+           << utf8FromWide(preferences.stream_resolution) << '\n'
+           << "stream_fps=" << preferences.stream_fps << '\n'
            << "ppe_class_conf=";
     for (std::size_t index = 0; index < kPpeOutputLabels.size(); ++index) {
         if (index != 0) output << ',';
         const std::wstring threshold = formatPpeConfidenceThreshold(
             preferences.ppe_class_confidences[index]);
         output << kPpeOutputLabels[index] << ':'
-               << std::string(threshold.begin(), threshold.end());
+               << utf8FromWide(threshold);
     }
     output << '\n';
     output << "ppe_enabled=";
@@ -490,6 +620,7 @@ void saveOperatorPreferencesAtomic(
 std::vector<std::string_view> visibleLauncherControlKeys() {
     return {
         "source", "source_label", "saved_camera", "output", "analytics", "compute",
+        "rtsp_transport", "video_acceleration", "stream_resolution", "stream_fps",
         "imgsz", "Gloves", "Person", "Safety_boots", "Vest", "respirador",
         "tapaorejas", "Hard_hat", "lentes_protectores", "show", "language_icon",
         "theme_icon", "validate", "start", "stop", "status", "log_path",

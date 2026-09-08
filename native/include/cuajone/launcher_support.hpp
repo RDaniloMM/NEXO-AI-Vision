@@ -45,6 +45,10 @@ struct OperatorPreferences {
     };
     std::array<bool, kPpeItemCount> ppe_enabled{true, true, true, true, true, true, true};
     bool show_window{true};
+    RtspTransport rtsp_transport{RtspTransport::Tcp};
+    VideoAcceleration video_acceleration{VideoAcceleration::Auto};
+    std::wstring stream_resolution{L"1920x1080"};
+    int stream_fps{30};
 };
 
 struct ManagedModelSet {
@@ -65,6 +69,10 @@ struct LauncherSettings {
     std::filesystem::path output;
     AnalyticsMode analytics_mode{AnalyticsMode::PpeFall};
     ComputeMode compute_mode{ComputeMode::Auto};
+    RtspTransport rtsp_transport{RtspTransport::Tcp};
+    VideoAcceleration video_acceleration{VideoAcceleration::Auto};
+    std::wstring stream_resolution{L"1920x1080"};
+    int stream_fps{30};
     std::filesystem::path managed_model_root;
     std::wstring source_label;
     std::vector<std::pair<std::wstring, std::wstring>> runtime_options;
@@ -88,6 +96,11 @@ ManagedModelSet resolveManagedModelSet(
     bool pose_required);
 LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight);
 inline constexpr std::array<int, 5> kTelemetryIntervals{1, 5, 10, 30, 60};
+inline constexpr std::array<std::wstring_view, 7> kStreamResolutions{
+    L"640x360", L"640x480", L"1280x720", L"1920x1080",
+    L"2560x1440", L"2688x1512", L"3840x2160",
+};
+inline constexpr std::array<int, 6> kStreamFrameRates{5, 10, 15, 20, 25, 30};
 float parsePpeConfidenceThreshold(std::wstring_view text);
 std::wstring formatPpeConfidenceThreshold(float value);
 OperatorPreferences parseOperatorPreferences(std::string_view text);

@@ -18,12 +18,19 @@ enlaza `cuajone_runtime`, OpenCV, ONNX Runtime, CUDA ni TensorRT.
 
 ## Ruta rápida
 
-1. Prepara `.tools\native` con las herramientas y SDK indicados en Prerrequisitos.
-2. Ejecuta `./installer/native/Provision-Wix.ps1` para fijar el CLI WiX local que
-   construye el MSI, y `./native/Provision-TrackingDependencies.ps1` para verificar
-   las fuentes de tracking.
-3. Ejecuta `./native/Provision-Resvg.ps1` para la herramienta de iconos y define
-   `ONNXRUNTIME_ROOT`, `TENSORRT_ROOT` y `OpenCV_DIR` sin copiar binarios al repositorio.
+1. Instala para todos los usuarios **Visual Studio 2022 Build Tools 17.14** con el
+   workload `Microsoft.VisualStudio.Workload.VCTools` y el componente CMake.
+2. Descarga el SDK autorizado TensorRT 11.1.0.106 para Windows/CUDA 12.9 y extraelo.
+3. Ejecuta una sola inicialización desde la raíz del repositorio:
+
+   ```powershell
+   .\native\Initialize-NativeBuildEnvironment.ps1 `
+     -TensorRtSource "$env:USERPROFILE\Downloads\TensorRT-Enterprise-11.1.0.106\TensorRT-11.1.0.106"
+   ```
+
+   El script crea enlaces locales hacia Build Tools y TensorRT, descarga OpenCV,
+   ONNX Runtime y los paquetes CUDA fijados, y aprovisiona WiX, iconos y dependencias
+   de tracking. TensorRT sigue siendo una descarga separada por su licencia NVIDIA.
 4. Compila y ejecuta primero `cpu-tests`.
 5. Compila `windows-msvc` y ejecuta `--preflight` con engines compatibles.
 6. Recién después realiza una prueba controlada con un video autorizado.
@@ -176,15 +183,35 @@ esto evita que Windows resuelva por error otra versión instalada en `System32`.
 
 ## Launcher gráfico
 
+### Overlay de depuración de rendimiento
+
+Al activar **Depuración de rendimiento** en el launcher y abrir la vista de cámara,
+el runtime dibuja un panel negro semitransparente sobre la esquina superior izquierda,
+inspirado en el diagnóstico de la captura de referencia. El panel se actualiza por
+frame e informa FPS mostrados/recibidos, el códec FOURCC reportado por la fuente,
+resolución, backend y aceleración de decodificación, estado de la fuente, GPU,
+latencias p50 de inferencia y frames omitidos. OpenCV no se presenta como códec:
+para RTSP normalmente el backend es FFmpeg y el códec es H.264 o H.265/HEVC. Si el
+backend no expone un dato, aparece como `No disponible`.
+
+La captura intenta abrir RTSP con la aceleración de video disponible y vuelve de
+forma segura a decodificación por CPU si el backend no la admite. Esta aceleración
+es independiente del backend de inferencia (`TensorRT`, ONNX CUDA o CPU). La
+telemetría JSON incluye además `capture_stream`, sin registrar la URL de la cámara.
+
 `NexoAIVisionLauncher.exe` y `NexoAIVision.exe` deben permanecer en la misma carpeta.
 El launcher resuelve el runtime hermano mediante la ruta absoluta de su propio
 módulo y usa `CreateProcessW`; no busca ejecutables mediante `PATH`. La interfaz
 expone la URL RTSP de la cámara, carpeta de salida, modo `PPE only`/`PPE + fall`,
-cómputo `Auto`/`CUDA`/`CPU`, `imgsz` 640/768/960/1280, ocho confianzas EPP y `Show`.
+cómputo `Auto`/`CUDA`/`CPU`, transporte, decodificación, resolución de la fuente,
+FPS de la fuente, `imgsz` 640/768/960/1280, ocho confianzas EPP y `Show`. La
+resolución y frecuencia predeterminadas son `1920x1080` y `30 FPS`; para RTSP el
+launcher reemplaza o agrega los parámetros `resolution` y `fps` sin duplicarlos.
+Los archivos de video locales no se modifican.
 `Load .env...` importa la configuración compatible del runtime nativo y conserva el
 archivo local fuera de Git; las opciones exclusivas de Python se ignoran y se
 informan en el estado. Los botones superiores cambian idioma y tema claro/oscuro.
-Idioma, tema, `imgsz` y confianzas se persisten atómicamente por usuario en
+Idioma, tema, resolución/FPS, `imgsz` y confianzas se persisten atómicamente por usuario en
 `%LocalAppData%\NexoAI Vision\operator-settings-v1.txt`; las credenciales permanecen
 exclusivamente en Credential Manager.
 `Validate` ejecuta el mismo plan con `--preflight`; `Start` inicia el procesamiento.
@@ -326,11 +353,27 @@ propios contratos aunque la configuración no provenga del CLI.
 
 `--rtsp-transport default|tcp|udp` conserva el comportamiento de OpenCV/FFmpeg o
 fuerza `rtsp_transport` mediante `OPENCV_FFMPEG_CAPTURE_OPTIONS`. La selección
-explícita reemplaza las demás opciones FFmpeg de esa variable para este proceso.
-Los defaults `--capture-open-timeout-ms 20000` y
-`--capture-read-timeout-ms 10000` se pasan como propiedades open-only de FFmpeg.
+explícita reemplaza las demás opciones FFmpeg de esa variable para este proceso;
+el default operativo es `tcp`. `--video-acceleration auto|d3d11|cpu` permite dejar
+que OpenCV elija, solicitar D3D11 o forzar software. Los defaults
+`--capture-open-timeout-ms 20000` y `--capture-read-timeout-ms 3000` se pasan como
+propiedades open-only de FFmpeg para detectar antes una interrupción de medios.
 Si esa apertura parametrizada falla, se intenta una apertura simple para builds de
 OpenCV que no aceptan esas propiedades.
+
+En cámaras AXIS, la vista web no entrega los cuadros mediante una petición HTTPS
+convencional. La implementación web de referencia de AXIS negocia RTSP sobre un
+WebSocket seguro (`wss://CAMERA/rtsp-over-websocket`), obtiene la sesión en
+`/axis-cgi/rtspwssession.cgi` y usa una fuente como
+`/axis-media/media.amp?videocodec=h264&resolution=1920x1080&fps=20&audio=0`.
+El navegador recibe RTP/H.264 sobre esa conexión TCP, lo remultiplexa a MP4
+fragmentado y lo entrega a Media Source Extensions para decodificación. Además,
+la opción *Adaptive stream* de la interfaz AXIS puede reducir la resolución al
+tamaño visible. Por eso una comparación justa con el ejecutable requiere TCP,
+los mismos parámetros de resolución/FPS y la misma configuración adaptativa;
+UDP puede mostrar pérdidas que la vista web oculta mediante retransmisión TCP.
+Referencias: [AXIS Media Stream Library JS](https://github.com/AxisCommunications/media-stream-library-js),
+[VAPIX Video Streaming](https://developer.axis.com/vapix/network-video/video-streaming/).
 
 `stop()` interrumpe inmediatamente la espera de backoff y solicita fin al reader.
 No libera `VideoCapture` desde otro hilo porque OpenCV no garantiza que eso sea
@@ -529,8 +572,9 @@ de esos componentes; todavía no se midió y no se estima aquí.
   el exportador real.
 - Fuera del pose ONNX `[1,300,57]` aprobado no se soportan otros layouts NMS
   fusionados, múltiples heads/outputs ni outputs dinámicos.
-- Por defecto la persistencia JPEG/CSV/JSONL sigue siendo síncrona. Con
-  `--evidence-writer-queue-capacity 1..4096`, un único worker FIFO acotado mueve la
+- Por defecto la persistencia JPEG/CSV/JSONL usa una cola asíncrona FIFO de 8 eventos.
+  `--evidence-writer-queue-capacity 1..4096` ajusta esa capacidad y `0` recupera el
+  modo síncrono. Un único worker acotado mueve la
   escritura fuera de inferencia, bloquea cuando se llena y drena eventos aceptados al
   cerrar. El reporte de telemetría schema v2 incluye `evidence_writer_queue`; un fallo
   terminal se registra en `evidence_writer_failures.jsonl` y hace fallar el proceso.

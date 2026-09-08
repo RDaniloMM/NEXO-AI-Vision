@@ -35,6 +35,14 @@ if ([string]::IsNullOrWhiteSpace($PoseOnnx)) { $PoseOnnx = Join-Path $PSScriptRo
 $TensorRtBin = $TensorRtBin.TrimEnd('\')
 $OutputDir = $OutputDir.TrimEnd('\')
 
+# trtexec runs with TensorRT's bin directory as its working directory. Resolve
+# caller-provided relative paths now so model and output locations do not change
+# meaning when the child process starts.
+$TensorRtBin = [System.IO.Path]::GetFullPath($TensorRtBin)
+$PpeOnnx = [System.IO.Path]::GetFullPath($PpeOnnx)
+$PoseOnnx = [System.IO.Path]::GetFullPath($PoseOnnx)
+$OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
+
 function Assert-File([string]$Path, [string]$Description) {
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "$Description was not found: $Path"

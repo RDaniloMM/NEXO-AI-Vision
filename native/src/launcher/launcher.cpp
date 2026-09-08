@@ -32,6 +32,8 @@ namespace {
 using namespace cuajone::launcher;
 using cuajone::kAllowedImageSizes;
 using cuajone::kPpeOutputLabels;
+using cuajone::RtspTransport;
+using cuajone::VideoAcceleration;
 
 constexpr wchar_t kWindowClass[] = L"NexoAIVisionLauncherWindow";
 constexpr wchar_t kProductName[] = L"NexoAI Vision";
@@ -69,6 +71,10 @@ enum ControlId : int {
     AnalyticsCombo,
     ComputeCombo,
     ImageSizeCombo,
+    RtspTransportCombo,
+    VideoAccelerationCombo,
+    StreamResolutionCombo,
+    StreamFpsCombo,
     PpeThresholdBase = 200,
     PpeEnabledBase = 220,
     ShowCheck = 300,
@@ -110,6 +116,10 @@ struct LauncherWindow {
     HWND analytics{};
     HWND compute{};
     HWND image_size{};
+    HWND rtsp_transport{};
+    HWND video_acceleration{};
+    HWND stream_resolution{};
+    HWND stream_fps{};
     std::array<HWND, kPpeOutputLabels.size()> ppe_thresholds{};
     std::array<HWND, cuajone::kPpeItemCount> ppe_enabled{};
     HWND show{};
@@ -767,8 +777,67 @@ void createControls(LauncherWindow& state) {
     SendMessageW(state.image_size, CB_SETCURSEL,
         image_position == kAllowedImageSizes.end() ? 0 : image_position - kAllowedImageSizes.begin(), 0);
 
+    addLocalizedText(
+        state, createLabel(state, L"RTSP transport", label_x, row_y + 186, 120),
+        L"RTSP transport", L"Transporte RTSP");
+    state.rtsp_transport = createControl(
+        state, 0, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST,
+        edit_x, row_y + 184, 220, 160, RtspTransportCombo);
+    SendMessageW(state.rtsp_transport, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"TCP"));
+    SendMessageW(state.rtsp_transport, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"UDP"));
+    SendMessageW(state.rtsp_transport, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Default"));
+    SendMessageW(state.rtsp_transport, CB_SETCURSEL,
+        state.preferences.rtsp_transport == RtspTransport::Udp ? 1
+            : state.preferences.rtsp_transport == RtspTransport::Default ? 2 : 0,
+        0);
+
+    addLocalizedText(
+        state, createLabel(state, L"Video decoding", 410, row_y + 186, 118),
+        L"Video decoding", L"Decodificación");
+    state.video_acceleration = createControl(
+        state, 0, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST,
+        530, row_y + 184, 220, 160, VideoAccelerationCombo);
+    SendMessageW(state.video_acceleration, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Auto"));
+    SendMessageW(state.video_acceleration, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"D3D11"));
+    SendMessageW(state.video_acceleration, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"CPU"));
+    SendMessageW(state.video_acceleration, CB_SETCURSEL,
+        state.preferences.video_acceleration == VideoAcceleration::D3d11 ? 1
+            : state.preferences.video_acceleration == VideoAcceleration::Cpu ? 2 : 0,
+        0);
+
+    addLocalizedText(
+        state, createLabel(state, L"Stream resolution", label_x, row_y + 226, 120),
+        L"Stream resolution", L"Resolución de video");
+    state.stream_resolution = createClosedCombo(
+        state, StreamResolutionCombo, edit_x, row_y + 224, 220);
+    for (const std::wstring_view resolution : kStreamResolutions) {
+        const std::wstring value(resolution);
+        SendMessageW(
+            state.stream_resolution, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value.c_str()));
+    }
+    const auto resolution_position = std::ranges::find(
+        kStreamResolutions, std::wstring_view(state.preferences.stream_resolution));
+    SendMessageW(state.stream_resolution, CB_SETCURSEL,
+        resolution_position == kStreamResolutions.end()
+            ? 3 : resolution_position - kStreamResolutions.begin(),
+        0);
+
+    addLocalizedText(
+        state, createLabel(state, L"Stream FPS", 410, row_y + 226, 118),
+        L"Stream FPS", L"FPS de video");
+    state.stream_fps = createClosedCombo(state, StreamFpsCombo, 530, row_y + 224, 120);
+    for (const int fps : kStreamFrameRates) {
+        const std::wstring value = std::to_wstring(fps);
+        SendMessageW(state.stream_fps, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value.c_str()));
+    }
+    const auto fps_position = std::ranges::find(kStreamFrameRates, state.preferences.stream_fps);
+    SendMessageW(state.stream_fps, CB_SETCURSEL,
+        fps_position == kStreamFrameRates.end()
+            ? 5 : fps_position - kStreamFrameRates.begin(),
+        0);
+
     const HWND threshold_heading = createLabel(
-        state, L"PPE class confidence (0.00-1.00)", label_x, row_y + 184, 320);
+        state, L"PPE class confidence (0.00-1.00)", label_x, row_y + 264, 320);
     addLocalizedText(
         state, threshold_heading,
         L"PPE class confidence (0.00-1.00)", L"Confianza por clase EPP (0.00-1.00)");
@@ -777,7 +846,7 @@ void createControls(LauncherWindow& state) {
     constexpr std::array<std::size_t, cuajone::kPpeItemCount> item_class_ids{0, 2, 3, 4, 5, 6, 7};
     for (std::size_t index = 0; index < kPpeOutputLabels.size(); ++index) {
         const int row = static_cast<int>(index % 4);
-        const int y = row_y + 214 + row * 34;
+        const int y = row_y + 294 + row * 34;
         const int text_length = MultiByteToWideChar(
             CP_UTF8, MB_ERR_INVALID_CHARS, kPpeOutputLabels[index].data(),
             static_cast<int>(kPpeOutputLabels[index].size()), nullptr, 0);
@@ -817,7 +886,7 @@ void createControls(LauncherWindow& state) {
 
     state.show = createControl(
         state, 0, L"BUTTON", L"Show annotated video window",
-        WS_TABSTOP | BS_AUTOCHECKBOX, edit_x, row_y + 358, 340, 24, ShowCheck);
+        WS_TABSTOP | BS_AUTOCHECKBOX, edit_x, row_y + 438, 340, 24, ShowCheck);
     SendMessageW(
         state.show, BM_SETCHECK,
         state.preferences.show_window ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -826,31 +895,31 @@ void createControls(LauncherWindow& state) {
 
     state.validate = createControl(
         state, 0, L"BUTTON", L"Validate", WS_TABSTOP | BS_OWNERDRAW,
-        edit_x, row_y + 396, 110, 32, ValidateButton);
+        edit_x, row_y + 476, 110, 32, ValidateButton);
     addLocalizedText(state, state.validate, L"Validate", L"Validar");
     state.start = createControl(
         state, 0, L"BUTTON", L"Start", WS_TABSTOP | BS_OWNERDRAW,
-        270, row_y + 396, 110, 32, StartButton);
+        270, row_y + 476, 110, 32, StartButton);
     addLocalizedText(state, state.start, L"Start", L"Iniciar");
     state.stop = createControl(
         state, 0, L"BUTTON", L"Stop", WS_TABSTOP | BS_OWNERDRAW,
-        394, row_y + 396, 110, 32, StopButton);
+        394, row_y + 476, 110, 32, StopButton);
     addLocalizedText(state, state.stop, L"Stop", L"Detener");
     EnableWindow(state.stop, FALSE);
 
     addLocalizedText(
-        state, createLabel(state, L"Status", label_x, row_y + 448, 120),
+        state, createLabel(state, L"Status", label_x, row_y + 528, 120),
         L"Status", L"Estado");
     state.status = createControl(
         state, WS_EX_CLIENTEDGE, L"STATIC", L"Ready", SS_LEFT | SS_CENTERIMAGE,
-        edit_x, row_y + 444, 724, 32, StatusText);
+        edit_x, row_y + 524, 724, 32, StatusText);
     addLocalizedText(
-        state, createLabel(state, L"Log path", label_x, row_y + 492, 120),
+        state, createLabel(state, L"Log path", label_x, row_y + 572, 120),
         L"Log path", L"Ruta del log");
-    state.log_path = createEdit(state, LogPathEdit, edit_x, row_y + 488, 620, true);
+    state.log_path = createEdit(state, LogPathEdit, edit_x, row_y + 568, 620, true);
     const HWND open_log = createControl(
         state, 0, L"BUTTON", L"Open log", WS_TABSTOP | BS_OWNERDRAW,
-        778, row_y + 488, 92, 25, OpenLogButton);
+        778, row_y + 568, 92, 25, OpenLogButton);
     addLocalizedText(state, open_log, L"Open log", L"Abrir log");
 
     state.program_data = knownProgramData();
@@ -921,6 +990,37 @@ void loadEnv(LauncherWindow& state) {
         SendMessageW(state.show, BM_SETCHECK,
             (*show == L"1" || upper(*show) == L"TRUE") ? BST_CHECKED : BST_UNCHECKED, 0);
     }
+    if (const auto transport = envValue(values, L"RTSP_TRANSPORT")) {
+        const std::wstring mode = upper(*transport);
+        if (mode == L"TCP") SendMessageW(state.rtsp_transport, CB_SETCURSEL, 0, 0);
+        else if (mode == L"UDP") SendMessageW(state.rtsp_transport, CB_SETCURSEL, 1, 0);
+        else if (mode == L"DEFAULT") SendMessageW(state.rtsp_transport, CB_SETCURSEL, 2, 0);
+        else throw std::invalid_argument("RTSP_TRANSPORT must be tcp, udp, or default");
+    }
+    if (const auto acceleration = envValue(values, L"VIDEO_ACCELERATION")) {
+        const std::wstring mode = upper(*acceleration);
+        if (mode == L"AUTO") SendMessageW(state.video_acceleration, CB_SETCURSEL, 0, 0);
+        else if (mode == L"D3D11") SendMessageW(state.video_acceleration, CB_SETCURSEL, 1, 0);
+        else if (mode == L"CPU") SendMessageW(state.video_acceleration, CB_SETCURSEL, 2, 0);
+        else throw std::invalid_argument("VIDEO_ACCELERATION must be auto, d3d11, or cpu");
+    }
+    if (const auto resolution = envValue(values, L"RTSP_RESOLUTION")) {
+        const auto found = std::ranges::find(kStreamResolutions, std::wstring_view(*resolution));
+        if (found == kStreamResolutions.end()) {
+            throw std::invalid_argument("RTSP_RESOLUTION is not supported by the launcher");
+        }
+        SendMessageW(
+            state.stream_resolution, CB_SETCURSEL, found - kStreamResolutions.begin(), 0);
+    }
+    if (const auto fps = envValue(values, L"RTSP_FPS")) {
+        wchar_t* end = nullptr;
+        const long parsed = std::wcstol(fps->c_str(), &end, 10);
+        const auto found = std::ranges::find(kStreamFrameRates, static_cast<int>(parsed));
+        if (end != fps->c_str() + fps->size() || found == kStreamFrameRates.end()) {
+            throw std::invalid_argument("RTSP_FPS must be 5, 10, 15, 20, 25, or 30");
+        }
+        SendMessageW(state.stream_fps, CB_SETCURSEL, found - kStreamFrameRates.begin(), 0);
+    }
     if (const auto confidence = envValue(values, L"PPE_CONF")) {
         int selection{};
         try {
@@ -956,6 +1056,7 @@ void loadEnv(LauncherWindow& state) {
         }
     };
     append(L"TARGET_INFERENCE_FPS", L"--target-fps");
+    append(L"EVIDENCE_WRITER_QUEUE_CAPACITY", L"--evidence-writer-queue-capacity");
     append(L"POSE_CONF", L"--pose-conf");
     append(L"IOU_THRESHOLD", L"--nms-iou");
     append(L"EPP_WINDOW", L"--ppe-window");
@@ -974,7 +1075,6 @@ void loadEnv(LauncherWindow& state) {
         state.runtime_options.emplace_back(L"--fall-track-ttl", *ttl);
     }
     append(L"RECONNECT_DELAY_S", L"--reconnect-delay");
-    append(L"RTSP_TRANSPORT", L"--rtsp-transport");
     append(L"RTSP_OPEN_TIMEOUT_MS", L"--capture-open-timeout-ms");
     append(L"RTSP_READ_TIMEOUT_MS", L"--capture-read-timeout-ms");
     if (const auto device = envValue(values, L"YOLO_DEVICE")) {
@@ -1070,6 +1170,24 @@ LauncherSettings readSettings(const LauncherWindow& state) {
     const LRESULT compute = SendMessageW(state.compute, CB_GETCURSEL, 0, 0);
     settings.compute_mode = compute == 1
         ? ComputeMode::Cuda : (compute == 2 ? ComputeMode::Cpu : ComputeMode::Auto);
+    const LRESULT transport = SendMessageW(state.rtsp_transport, CB_GETCURSEL, 0, 0);
+    settings.rtsp_transport = transport == 1
+        ? RtspTransport::Udp : (transport == 2 ? RtspTransport::Default : RtspTransport::Tcp);
+    const LRESULT acceleration = SendMessageW(state.video_acceleration, CB_GETCURSEL, 0, 0);
+    settings.video_acceleration = acceleration == 1
+        ? VideoAcceleration::D3d11
+        : (acceleration == 2 ? VideoAcceleration::Cpu : VideoAcceleration::Auto);
+    const LRESULT resolution = SendMessageW(state.stream_resolution, CB_GETCURSEL, 0, 0);
+    if (resolution == CB_ERR
+        || static_cast<std::size_t>(resolution) >= kStreamResolutions.size()) {
+        throw std::invalid_argument("Select a supported stream resolution");
+    }
+    settings.stream_resolution = kStreamResolutions[static_cast<std::size_t>(resolution)];
+    const LRESULT fps = SendMessageW(state.stream_fps, CB_GETCURSEL, 0, 0);
+    if (fps == CB_ERR || static_cast<std::size_t>(fps) >= kStreamFrameRates.size()) {
+        throw std::invalid_argument("Select a supported stream frame rate");
+    }
+    settings.stream_fps = kStreamFrameRates[static_cast<std::size_t>(fps)];
     settings.managed_model_root = state.managed_model_root;
     settings.source_label = editText(state.source_label);
     settings.runtime_options = state.runtime_options;
@@ -1099,6 +1217,10 @@ void persistPreferences(LauncherWindow& state) {
     state.preferences.ppe_class_confidences = current.ppe_class_confidences;
     state.preferences.ppe_enabled = current.ppe_enabled;
     state.preferences.show_window = current.show_window;
+    state.preferences.rtsp_transport = current.rtsp_transport;
+    state.preferences.video_acceleration = current.video_acceleration;
+    state.preferences.stream_resolution = current.stream_resolution;
+    state.preferences.stream_fps = current.stream_fps;
     for (std::size_t index = 0; index < current.ppe_class_confidences.size(); ++index) {
         setThresholdComboValue(
             state.ppe_thresholds[index],
@@ -1513,7 +1635,10 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wparam, LPARA
                     && HIWORD(wparam) == BN_CLICKED) {
                     persistPreferences(*state);
                 }
-                else if (id == ImageSizeCombo && HIWORD(wparam) == CBN_SELCHANGE) {
+                else if ((id == ImageSizeCombo || id == RtspTransportCombo
+                             || id == VideoAccelerationCombo || id == StreamResolutionCombo
+                             || id == StreamFpsCombo)
+                    && HIWORD(wparam) == CBN_SELCHANGE) {
                     persistPreferences(*state);
                 }
                 else if (id >= PpeThresholdBase
@@ -1597,7 +1722,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     HWND window = CreateWindowExW(
         0, kWindowClass, kProductName,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 906, 650,
+        CW_USEDEFAULT, CW_USEDEFAULT, 906, 730,
         nullptr, nullptr, instance, &state);
     if (window == nullptr) {
         MessageBoxW(nullptr, L"Launcher window creation failed", kProductName, MB_OK | MB_ICONERROR);

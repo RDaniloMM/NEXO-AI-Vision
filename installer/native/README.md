@@ -166,7 +166,10 @@ falla, entrega el archivo indicado por `/L*V` al equipo responsable.
 
 Desde el menú Inicio, abre **NexoAI Vision**. La prueba operativa es correcta
 si aparece el formulario; confirma `imgsz`, ocho confianzas, idioma y tema, y
-ciérralo sin completar una fuente. No deben existir selectores de rutas de modelos.
+los selectores de transporte RTSP (TCP/UDP/Default) y decodificación de video
+(Auto/D3D11/CPU), además de resolución `1920x1080` y `30 FPS` por defecto, y
+ciérralo sin completar una fuente. No deben existir selectores
+de rutas de modelos.
 El acceso **NexoAI Vision - Command Help** se conserva para soporte
 avanzado y ejecuta únicamente `--help`.
 
@@ -327,8 +330,11 @@ determinista por ruta staged; ese archivo no se versiona.
 ### Bootstrap reproducible
 
 El repositorio versiona los scripts, versiones y verificaciones de integridad;
-no versiona instaladores, ejecutables, SDKs, modelos ni caches locales. Después de
-instalar el .NET SDK, prepara el WiX local con:
+no versiona instaladores, ejecutables, SDKs, modelos ni caches locales. Para
+preparar el entorno completo, consulta `native/README.md` y ejecuta
+`native/Initialize-NativeBuildEnvironment.ps1` después de instalar Build Tools y
+obtener TensorRT autorizado. El script también prepara WiX. Si solo necesitas WiX,
+después de instalar el .NET SDK ejecútalo directamente con:
 
 ```powershell
 .\installer\native\Provision-Wix.ps1

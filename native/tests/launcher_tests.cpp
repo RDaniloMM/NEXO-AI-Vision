@@ -18,6 +18,8 @@
 namespace {
 
 using namespace cuajone::launcher;
+using cuajone::RtspTransport;
+using cuajone::VideoAcceleration;
 
 void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
@@ -38,6 +40,14 @@ bool contains(const std::vector<std::wstring>& arguments, std::wstring_view valu
         if (argument == value) return true;
     }
     return false;
+}
+
+std::wstring_view argumentValue(
+    const std::vector<std::wstring>& arguments,
+    std::wstring_view option) {
+    const auto found = std::ranges::find(arguments, option);
+    if (found == arguments.end() || std::next(found) == arguments.end()) return {};
+    return *std::next(found);
 }
 
 class TemporaryTree {
@@ -103,9 +113,19 @@ void testCameraOrVideoSourceIsRequired() {
         "Launcher accepted an RTSP URL without a host");
     settings.source = L"rtsp://camera.example/live";
     const auto plan = buildLaunchPlan(settings, false);
-    require(contains(plan.arguments, L"--source")
-            && contains(plan.arguments, L"rtsp://camera.example/live"),
-        "Launcher did not emit the RTSP camera URL");
+    require(argumentValue(plan.arguments, L"--source")
+            == L"rtsp://camera.example/live?resolution=1920x1080&fps=30",
+        "Launcher did not apply the default RTSP resolution and frame rate");
+
+    settings.source = L"rtsp://camera.example/axis-media/media.amp?"
+        L"videocodec=h264&resolution=640x480&FPS=5&fps=10";
+    settings.stream_resolution = L"1280x720";
+    settings.stream_fps = 25;
+    const auto replaced = buildLaunchPlan(settings, false);
+    require(argumentValue(replaced.arguments, L"--source")
+            == L"rtsp://camera.example/axis-media/media.amp?"
+               L"videocodec=h264&resolution=1280x720&fps=25",
+        "Launcher duplicated or failed to replace existing RTSP stream parameters");
 }
 
 void testModelMatrixAndArguments() {
@@ -144,6 +164,8 @@ void testModelMatrixAndArguments() {
         "Explicit CUDA plan emitted the wrong model family");
 
     settings.compute_mode = ComputeMode::Cpu;
+    settings.rtsp_transport = RtspTransport::Udp;
+    settings.video_acceleration = VideoAcceleration::D3d11;
     requireThrows([&] { buildLaunchPlan(settings, false); },
         "CPU accepted missing ONNX models");
     addOnnxModels(settings, tree);
@@ -220,6 +242,10 @@ void testOperationalSettingsAndArguments() {
     auto settings = baseSettings(tree);
     addOnnxModels(settings, tree);
     settings.compute_mode = ComputeMode::Cpu;
+    settings.rtsp_transport = RtspTransport::Udp;
+    settings.video_acceleration = VideoAcceleration::D3d11;
+    settings.stream_resolution = L"2688x1512";
+    settings.stream_fps = 20;
     settings.image_size = 960;
     settings.ppe_class_confidences = {
         0.01F, 0.12F, 0.23F, 0.34F, 0.45F, 0.56F, 0.67F, 0.78F,
@@ -236,6 +262,12 @@ void testOperationalSettingsAndArguments() {
         "Launcher class threshold order or formatting changed");
     require(contains(plan.arguments, L"--show"),
         "Launcher did not show annotated video by default");
+    require(contains(plan.arguments, L"--rtsp-transport") && contains(plan.arguments, L"udp")
+            && contains(plan.arguments, L"--video-acceleration") && contains(plan.arguments, L"d3d11"),
+        "Launcher did not emit the selected transport and video acceleration");
+    require(argumentValue(plan.arguments, L"--source")
+            == L"rtsp://camera.example:554/axis-media/media.amp?resolution=2688x1512&fps=20",
+        "Launcher did not emit the selected stream resolution and FPS");
 
     settings.show_window = false;
     require(!contains(buildLaunchPlan(settings, false).arguments, L"--show"),
@@ -254,6 +286,14 @@ void testOperationalSettingsAndArguments() {
     requireThrows([&] { buildLaunchPlan(settings, false); },
         "Launcher accepted an unsupported imgsz");
     settings.image_size = 640;
+    settings.stream_resolution = L"1024x768";
+    requireThrows([&] { buildLaunchPlan(settings, false); },
+        "Launcher accepted an unsupported stream resolution");
+    settings.stream_resolution = L"1920x1080";
+    settings.stream_fps = 24;
+    requireThrows([&] { buildLaunchPlan(settings, false); },
+        "Launcher accepted an unsupported stream frame rate");
+    settings.stream_fps = 30;
     settings.runtime_options.emplace_back(L"--ppe-onnx", L"unmanaged.onnx");
     requireThrows([&] { buildLaunchPlan(settings, false); },
         "Launcher accepted a model-path UI option");
@@ -290,13 +330,20 @@ void testPreferencesPersistenceAndUiContract() {
     preferences.show_window = false;
     preferences.ppe_enabled[0] = false;
     preferences.ppe_enabled[6] = false;
+    preferences.rtsp_transport = RtspTransport::Udp;
+    preferences.video_acceleration = VideoAcceleration::Cpu;
+    preferences.stream_resolution = L"2560x1440";
+    preferences.stream_fps = 25;
     saveOperatorPreferencesAtomic(path, preferences);
     const auto loaded = loadOperatorPreferences(path);
     require(loaded.language == UiLanguage::Spanish && loaded.theme == ThemeMode::Dark
             && loaded.image_size == 1280
             && loaded.ppe_class_confidences[0] == 0.11F
             && loaded.ppe_class_confidences[7] == 0.88F
-            && !loaded.show_window && !loaded.ppe_enabled[0] && !loaded.ppe_enabled[6],
+            && !loaded.show_window && !loaded.ppe_enabled[0] && !loaded.ppe_enabled[6]
+            && loaded.rtsp_transport == RtspTransport::Udp
+            && loaded.video_acceleration == VideoAcceleration::Cpu
+            && loaded.stream_resolution == L"2560x1440" && loaded.stream_fps == 25,
         "Operator preferences did not roundtrip");
     std::ofstream(path, std::ios::binary | std::ios::trunc)
         << "schema_version=1\n"
@@ -309,6 +356,9 @@ void testPreferencesPersistenceAndUiContract() {
     require(legacy.language == UiLanguage::Spanish && legacy.theme == ThemeMode::Dark
             && legacy.image_size == 1280 && legacy.ppe_class_confidences[0] == 0.11F
             && legacy.ppe_class_confidences[7] == 0.88F && legacy.show_window
+            && legacy.rtsp_transport == RtspTransport::Tcp
+            && legacy.video_acceleration == VideoAcceleration::Auto
+            && legacy.stream_resolution == L"1920x1080" && legacy.stream_fps == 30
             && std::ranges::all_of(legacy.ppe_enabled, [](bool enabled) { return enabled; }),
         "Legacy preferences did not retain settings and default annotated video to enabled");
     std::ofstream(path, std::ios::binary | std::ios::trunc) << "corrupt";
@@ -321,7 +371,9 @@ void testPreferencesPersistenceAndUiContract() {
     const auto controls = visibleLauncherControlKeys();
     for (const std::string_view required : {
              "imgsz", "Gloves", "Person", "Safety_boots", "Vest", "respirador",
-             "tapaorejas", "Hard_hat", "lentes_protectores", "language_icon", "theme_icon"}) {
+             "tapaorejas", "Hard_hat", "lentes_protectores", "rtsp_transport",
+             "video_acceleration", "stream_resolution", "stream_fps",
+             "language_icon", "theme_icon"}) {
         require(std::ranges::find(controls, required) != controls.end(),
             "Required launcher control is missing from the UI contract");
     }
@@ -407,7 +459,8 @@ void testPerformanceArguments() {
         }
     }
     settings.telemetry_interval_seconds = 5;
-    for (const auto* flag : {L"--performance-report", L"--telemetry-interval-sec"}) {
+    for (const auto* flag : {L"--performance-report", L"--telemetry-interval-sec",
+             L"--rtsp-transport", L"--video-acceleration"}) {
         settings.runtime_options = {{flag, L"1"}};
         requireThrows([&] { buildLaunchPlan(settings, false); }, "Untyped diagnostics override accepted");
     }

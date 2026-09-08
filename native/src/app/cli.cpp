@@ -126,6 +126,13 @@ RtspTransport parseRtspTransport(std::string_view text) {
     throw std::invalid_argument("--rtsp-transport must be default, tcp, or udp");
 }
 
+VideoAcceleration parseVideoAcceleration(std::string_view text) {
+    if (text == "auto") return VideoAcceleration::Auto;
+    if (text == "d3d11") return VideoAcceleration::D3d11;
+    if (text == "cpu") return VideoAcceleration::Cpu;
+    throw std::invalid_argument("--video-acceleration must be auto, d3d11, or cpu");
+}
+
 AnalyticsMode parseAnalyticsMode(std::string_view text) {
     if (text == "ppe-only") return AnalyticsMode::PpeOnly;
     if (text == "ppe-fall") return AnalyticsMode::PpeFall;
@@ -211,7 +218,8 @@ void validate(RuntimeConfig& config) {
     }
     if (benchmark && (config.show_window || config.preflight || config.target_fps_explicit
             || config.telemetry_interval_seconds > 0.0
-            || config.rtsp_transport_explicit || config.reconnect_delay_explicit
+            || config.rtsp_transport_explicit || config.video_acceleration_explicit
+            || config.reconnect_delay_explicit
             || config.maximum_reconnect_delay_explicit || config.capture_open_timeout_explicit
             || config.capture_read_timeout_explicit)) {
         throw std::invalid_argument("--benchmark-image cannot be combined with monitor, RTSP, capture, --target-fps, --telemetry-interval-sec, or --preflight options");
@@ -378,6 +386,7 @@ RuntimeConfig parseCommandLine(int argc, char** argv) {
         else if (option == "--capture-open-timeout-ms") { config.capture_open_timeout = parseMilliseconds(requireValue(index, argc, argv, option), option); config.capture_open_timeout_explicit = true; }
         else if (option == "--capture-read-timeout-ms") { config.capture_read_timeout = parseMilliseconds(requireValue(index, argc, argv, option), option); config.capture_read_timeout_explicit = true; }
         else if (option == "--rtsp-transport") { config.rtsp_transport = parseRtspTransport(requireValue(index, argc, argv, option)); config.rtsp_transport_explicit = true; }
+        else if (option == "--video-acceleration") { config.video_acceleration = parseVideoAcceleration(requireValue(index, argc, argv, option)); config.video_acceleration_explicit = true; }
         else if (option == "--ppe-window") config.ppe.window = parseNumber<std::size_t>(requireValue(index, argc, argv, option), option);
         else if (option == "--ppe-min-samples") config.ppe.minimum_samples = parseNumber<std::size_t>(requireValue(index, argc, argv, option), option);
         else if (option == "--ppe-present-ratio") config.ppe.present_ratio = parseNumber<float>(requireValue(index, argc, argv, option), option);
@@ -431,7 +440,7 @@ void printHelp(std::ostream& output) {
         "  --benchmark-image <path>    Run a bounded in-process benchmark on one local image\n"
         "  --benchmark-warmup <n>      Benchmark warmup calls (default: 10; 0..10000)\n"
         "  --benchmark-iterations <n>  Measured benchmark calls (default: 100; 1..10000)\n"
-        "  --evidence-writer-queue-capacity <n>  0 is synchronous; 1..4096 enables FIFO writer\n"
+        "  --evidence-writer-queue-capacity <n>  0 is synchronous; 1..4096 enables FIFO writer (default: 8)\n"
         "  --preflight                  Validate everything without opening the source\n"
         "  --mode <mode>                ppe-only or ppe-fall (default: ppe-fall)\n"
         "  --device <index>             CUDA device index (default: first compatible)\n"
@@ -458,11 +467,12 @@ void printHelp(std::ostream& output) {
         "  --target-fps <number>        Non-negative; 0 processes every latest frame\n"
         "  --show                       Display the annotated OpenCV window\n\n"
         "Capture and RTSP:\n"
-        "  --rtsp-transport <mode>      default, tcp, or udp (default: default)\n"
+        "  --rtsp-transport <mode>      default, tcp, or udp (default: tcp)\n"
+        "  --video-acceleration <mode> auto, d3d11, or cpu (default: auto)\n"
         "  --reconnect-delay <seconds>  Non-negative initial delay (default: 5)\n"
         "  --max-reconnect-delay <sec>  At least reconnect delay (default: 30)\n"
         "  --capture-open-timeout-ms <n> Non-negative FFmpeg open timeout (default: 20000)\n"
-        "  --capture-read-timeout-ms <n> Non-negative FFmpeg read timeout (default: 10000)\n\n"
+        "  --capture-read-timeout-ms <n> Non-negative FFmpeg read timeout (default: 3000)\n\n"
         "PPE voting:\n"
         "  --ppe-window <number>         Positive voting capacity (default: 20)\n"
         "  --ppe-min-samples <number>    In [1, window] (default: 12)\n"

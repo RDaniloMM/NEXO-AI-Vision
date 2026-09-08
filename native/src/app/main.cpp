@@ -26,6 +26,7 @@
 #include <ctime>
 #include <cwchar>
 #include <filesystem>
+#include <format>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -276,6 +277,15 @@ std::unique_ptr<NativeEnginePipeline> runBasePreflight(
     }
     if (config.benchmark_image.empty()) {
         std::cout << "Source: " << redactSource(config.source) << " | label: " << config.source_label << '\n';
+        if (isRtspSource(config.source)) {
+            const char* transport = config.rtsp_transport == RtspTransport::Tcp
+                ? "tcp" : config.rtsp_transport == RtspTransport::Udp ? "udp" : "default";
+            const char* acceleration = config.video_acceleration == VideoAcceleration::D3d11
+                ? "d3d11" : config.video_acceleration == VideoAcceleration::Cpu ? "cpu" : "auto";
+            std::cout << "RTSP transport: " << transport
+                      << " | requested video acceleration: " << acceleration
+                      << " | read timeout: " << config.capture_read_timeout.count() << " ms\n";
+        }
         std::cout << "Output: " << config.output.string() << '\n';
         if (summary.pose_loaded && summary.pose_requires_person) {
             std::cout << "Pose person gate: enabled (pose runs only when PPE detects a person)\n";
@@ -361,6 +371,61 @@ void drawAssociatedItem(cv::Mat& frame, const std::optional<Detection>& item, co
         cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 220, 255), 2, cv::LINE_AA);
 }
 
+void drawPerformanceOverlay(
+    cv::Mat& frame,
+    const OverlayMetrics& metrics,
+    bool source_connected = true) {
+    constexpr int kPadding = 10;
+    const int line_height = 18;
+    const int line_count = 14;
+    const int width = std::min(frame.cols, std::min(390, std::max(280, frame.cols / 3)));
+    const int height = kPadding * 2 + line_count * line_height;
+    const cv::Rect panel(0, 0, width, std::min(height, frame.rows));
+    cv::Mat panel_pixels = frame(panel);
+    cv::Mat black(panel_pixels.size(), panel_pixels.type(), cv::Scalar(0, 0, 0));
+    cv::addWeighted(black, 0.62, panel_pixels, 0.38, 0.0, panel_pixels);
+    const std::vector<std::string> lines{
+        "Fotogramas por segundo: " + std::format("{:.2f}", metrics.displayed_fps),
+        "Codec de video: " + (metrics.video_codec.empty() ? "No disponible" : metrics.video_codec),
+        "Resolucion de video: " + std::to_string(metrics.frame_width) + "x" + std::to_string(metrics.frame_height),
+        "Backend de captura: " + (metrics.capture_backend.empty() ? "No disponible" : metrics.capture_backend),
+        "Decodificacion de video: " + (metrics.video_acceleration.empty() ? "No disponible" : metrics.video_acceleration),
+        std::string("Estado de fuente: ") + (source_connected ? "Conectada" : "Reconectando"),
+        std::string("Disponibilidad de imagen: ") + (source_connected ? "Disponible" : "Cuadro retenido"),
+        "Fotogramas por segundo (recibidos): " + std::format("{:.2f}", metrics.received_fps),
+        "Backend de inferencia: " + (metrics.backend.empty() ? "n/a" : metrics.backend),
+        "GPU Name: " + (metrics.device_name.empty() ? "n/a" : metrics.device_name),
+        "Latencia total p50: " + std::format("{:.1f} ms", metrics.pipeline_p50_ms),
+        "Inferencia EPP p50: " + std::format("{:.1f} ms", metrics.ppe_inference_p50_ms),
+        "Inferencia pose p50: " + std::format("{:.1f} ms", metrics.pose_inference_p50_ms),
+        "Frames omitidos: " + std::to_string(metrics.dropped_frames),
+    };
+    for (std::size_t index = 0; index < lines.size(); ++index) {
+        cv::putText(frame, lines[index], cv::Point(kPadding, kPadding + static_cast<int>(index + 1) * line_height - 4),
+            cv::FONT_HERSHEY_SIMPLEX, 0.42, cv::Scalar(235, 235, 235), 1, cv::LINE_AA);
+    }
+}
+
+void drawReconnectBanner(cv::Mat& frame) {
+    if (frame.empty()) return;
+    constexpr int kHeight = 58;
+    const int top = std::max(0, frame.rows - kHeight);
+    const cv::Rect banner(0, top, frame.cols, frame.rows - top);
+    cv::Mat pixels = frame(banner);
+    cv::Mat background(pixels.size(), pixels.type(), cv::Scalar(10, 10, 45));
+    cv::addWeighted(background, 0.78, pixels, 0.22, 0.0, pixels);
+    cv::putText(frame, "Reconectando a la camara...", cv::Point(16, top + 25),
+        cv::FONT_HERSHEY_SIMPLEX, 0.62, cv::Scalar(245, 245, 255), 2, cv::LINE_AA);
+    cv::putText(frame, "La ventana sigue activa; presiona Esc o Q para detener.", cv::Point(16, top + 48),
+        cv::FONT_HERSHEY_SIMPLEX, 0.44, cv::Scalar(210, 210, 230), 1, cv::LINE_AA);
+}
+
+bool liveWindowStopRequested() {
+    const int key = cv::waitKey(1) & 0xFF;
+    return key == 'q' || key == 27
+        || cv::getWindowProperty(kLiveAnalyticsWindowTitle, cv::WND_PROP_VISIBLE) < 1.0;
+}
+
 int monitor(
     const RuntimeConfig& config,
     NativeEnginePipeline& pipeline,
@@ -382,12 +447,15 @@ int monitor(
         std::chrono::duration<double>(config.maximum_reconnect_delay_seconds),
         config.capture_open_timeout,
         config.capture_read_timeout,
-        config.rtsp_transport, telemetry);
+        config.rtsp_transport,
+        config.video_acceleration,
+        telemetry);
 
     capture.start();
     std::uint64_t sequence{};
     auto next_inference = Clock::time_point::min();
     std::optional<std::string> last_capture_error;
+    cv::Mat last_displayed_frame;
     bool first_inference_logged{};
     const std::chrono::duration<double> telemetry_interval(config.telemetry_interval_seconds);
     const bool periodic_telemetry = telemetry != nullptr && telemetry_interval.count() > 0.0;
@@ -416,14 +484,36 @@ int monitor(
                 std::cerr << "Capture: " << *error << '\n';
                 last_capture_error = error;
             }
+            if (config.show_window) {
+                if (error) {
+                    cv::Mat waiting_frame = last_displayed_frame.empty()
+                        ? cv::Mat(720, 1280, CV_8UC3, cv::Scalar(24, 24, 24))
+                        : last_displayed_frame.clone();
+                    if (config.performance_report && telemetry != nullptr) {
+                        drawPerformanceOverlay(
+                            waiting_frame,
+                            telemetry->overlayMetrics(waiting_frame.cols, waiting_frame.rows),
+                            false);
+                    }
+                    drawReconnectBanner(waiting_frame);
+                    cv::imshow(kLiveAnalyticsWindowTitle, waiting_frame);
+                }
+                if (liveWindowStopRequested()) {
+                    stop_requested.store(true, std::memory_order_relaxed);
+                }
+            }
             continue;
         }
+        last_capture_error.reset();
         if (telemetry != nullptr) telemetry->recordLatestSlotSequence(sequence, latest_sequence);
         sequence = latest_sequence;
         const auto now = Clock::now();
         if (telemetry != nullptr) telemetry->addSample(PerformanceStage::FrameAge, now - published_at);
         if (config.target_fps > 0.0 && now < next_inference) {
             if (telemetry != nullptr) telemetry->skippedForTargetFps();
+            if (config.show_window && liveWindowStopRequested()) {
+                stop_requested.store(true, std::memory_order_relaxed);
+            }
             continue;
         }
         if (config.target_fps > 0.0) {
@@ -493,10 +583,13 @@ int monitor(
         }
 
         if (config.show_window) {
+            if (config.performance_report && telemetry != nullptr) {
+                telemetry->displayedFrame();
+                drawPerformanceOverlay(frame, telemetry->overlayMetrics(frame.cols, frame.rows));
+            }
+            last_displayed_frame = frame;
             cv::imshow(kLiveAnalyticsWindowTitle, frame);
-            const int key = cv::waitKey(1) & 0xFF;
-            if (key == 'q' || key == 27
-                || cv::getWindowProperty(kLiveAnalyticsWindowTitle, cv::WND_PROP_VISIBLE) < 1.0) {
+            if (liveWindowStopRequested()) {
                 stop_requested.store(true, std::memory_order_relaxed);
             }
         }

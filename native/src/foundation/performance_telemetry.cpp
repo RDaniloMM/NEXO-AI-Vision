@@ -56,6 +56,14 @@ void appendStats(std::ostringstream& output, const RollingSamples& samples) {
            << ",\"max_ms\":" << maximum << '}';
 }
 
+double percentileValue(const RollingSamples& samples, double quantile) {
+    if (samples.size == 0) return 0.0;
+    std::vector<double> sorted(samples.values.begin(), samples.values.begin() + samples.size);
+    std::sort(sorted.begin(), sorted.end());
+    const std::size_t index = static_cast<std::size_t>(std::ceil(quantile * sorted.size())) - 1;
+    return sorted[index];
+}
+
 void appendJsonString(std::ostringstream& output, std::string_view value) {
     output << '"';
     for (const unsigned char character : value) {
@@ -89,6 +97,7 @@ struct PerformanceTelemetry::Impl {
     mutable std::mutex mutex;
     std::array<RollingSamples, kStageNames.size()> stages;
     std::uint64_t captured_frames{};
+    std::uint64_t displayed_frames{};
     std::uint64_t processed_frames{};
     std::uint64_t latest_slot_sequence_gap_drops{};
     std::uint64_t capture_wait_timeouts{};
@@ -98,7 +107,10 @@ struct PerformanceTelemetry::Impl {
     std::uint64_t evidence_append_failed{};
     std::optional<EvidenceQueueTelemetry> evidence_queue;
     std::optional<ExecutionPathInfo> execution_path;
+    std::optional<CaptureStreamInfo> capture_stream;
     std::optional<BenchmarkMetadata> benchmark;
+    std::chrono::steady_clock::time_point first_frame_at{};
+    std::chrono::steady_clock::time_point last_frame_at{};
 };
 
 PerformanceTelemetry::PerformanceTelemetry(std::string_view source_mode)
@@ -116,7 +128,15 @@ void PerformanceTelemetry::addSample(PerformanceStage stage, std::chrono::steady
 
 void PerformanceTelemetry::capturedFrame() {
     std::scoped_lock lock(impl_->mutex);
+    const auto now = std::chrono::steady_clock::now();
+    if (impl_->first_frame_at == std::chrono::steady_clock::time_point{}) impl_->first_frame_at = now;
+    impl_->last_frame_at = now;
     ++impl_->captured_frames;
+}
+
+void PerformanceTelemetry::displayedFrame() {
+    std::scoped_lock lock(impl_->mutex);
+    ++impl_->displayed_frames;
 }
 
 void PerformanceTelemetry::processedFrame() {
@@ -167,10 +187,16 @@ void PerformanceTelemetry::setExecutionPath(ExecutionPathInfo info) {
     impl_->execution_path = std::move(info);
 }
 
+void PerformanceTelemetry::setCaptureStreamInfo(CaptureStreamInfo info) {
+    std::scoped_lock lock(impl_->mutex);
+    impl_->capture_stream = std::move(info);
+}
+
 void PerformanceTelemetry::reset() {
     std::scoped_lock lock(impl_->mutex);
     for (auto& stage : impl_->stages) stage.reset();
     impl_->captured_frames = 0;
+    impl_->displayed_frames = 0;
     impl_->processed_frames = 0;
     impl_->latest_slot_sequence_gap_drops = 0;
     impl_->capture_wait_timeouts = 0;
@@ -178,11 +204,46 @@ void PerformanceTelemetry::reset() {
     impl_->evidence_append_attempted = 0;
     impl_->evidence_append_written = 0;
     impl_->evidence_append_failed = 0;
+    impl_->first_frame_at = {};
+    impl_->last_frame_at = {};
 }
 
 void PerformanceTelemetry::setBenchmarkMetadata(BenchmarkMetadata metadata) {
     std::scoped_lock lock(impl_->mutex);
     impl_->benchmark = metadata;
+}
+
+OverlayMetrics PerformanceTelemetry::overlayMetrics(int frame_width, int frame_height) const {
+    std::scoped_lock lock(impl_->mutex);
+    OverlayMetrics result;
+    result.received_frames = impl_->captured_frames;
+    result.displayed_frames = impl_->displayed_frames;
+    result.dropped_frames = impl_->latest_slot_sequence_gap_drops;
+    result.frame_width = frame_width;
+    result.frame_height = frame_height;
+    result.pipeline_p50_ms = percentileValue(
+        impl_->stages[stageIndex(PerformanceStage::PipelineTotal)], 0.50);
+    result.ppe_inference_p50_ms = percentileValue(
+        impl_->stages[stageIndex(PerformanceStage::PpeInference)], 0.50);
+    result.pose_inference_p50_ms = percentileValue(
+        impl_->stages[stageIndex(PerformanceStage::PoseInference)], 0.50);
+    if (impl_->capture_stream) {
+        result.video_codec = impl_->capture_stream->codec;
+        result.capture_backend = impl_->capture_stream->backend;
+        result.video_acceleration = impl_->capture_stream->video_acceleration;
+    }
+    if (impl_->execution_path) {
+        result.backend = impl_->execution_path->backend;
+        result.provider = impl_->execution_path->provider;
+        result.device_name = impl_->execution_path->device_name;
+    }
+    const double seconds = impl_->first_frame_at == std::chrono::steady_clock::time_point{}
+        ? 0.0 : std::chrono::duration<double>(impl_->last_frame_at - impl_->first_frame_at).count();
+    if (seconds > 0.05) {
+        result.received_fps = static_cast<double>(result.received_frames - 1) / seconds;
+        result.displayed_fps = static_cast<double>(result.displayed_frames) / seconds;
+    }
+    return result;
 }
 
 std::string PerformanceTelemetry::jsonReport() const {
@@ -247,6 +308,16 @@ std::string PerformanceTelemetry::jsonReport() const {
                << ",\"device_count\":" << path.device_count
                << ",\"compute_sm_major\":" << path.compute_sm_major
                << ",\"compute_sm_minor\":" << path.compute_sm_minor << '}';
+    }
+    if (impl_->capture_stream) {
+        const auto& stream = *impl_->capture_stream;
+        output << ",\"capture_stream\":{\"codec\":";
+        appendJsonString(output, stream.codec);
+        output << ",\"backend\":";
+        appendJsonString(output, stream.backend);
+        output << ",\"video_acceleration\":";
+        appendJsonString(output, stream.video_acceleration);
+        output << '}';
     }
     output << '}';
     return output.str();

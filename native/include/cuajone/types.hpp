@@ -16,6 +16,12 @@ enum class RtspTransport {
     Udp,
 };
 
+enum class VideoAcceleration {
+    Auto,
+    D3d11,
+    Cpu,
+};
+
 enum class AnalyticsMode {
     PpeOnly,
     PpeFall,

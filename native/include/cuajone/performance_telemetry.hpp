@@ -67,6 +67,31 @@ struct ExecutionPathInfo {
     int compute_sm_minor{};
 };
 
+struct CaptureStreamInfo {
+    std::string codec;
+    std::string backend;
+    std::string video_acceleration;
+};
+
+struct OverlayMetrics {
+    double received_fps{};
+    double displayed_fps{};
+    std::uint64_t received_frames{};
+    std::uint64_t displayed_frames{};
+    std::uint64_t dropped_frames{};
+    int frame_width{};
+    int frame_height{};
+    double pipeline_p50_ms{};
+    double ppe_inference_p50_ms{};
+    double pose_inference_p50_ms{};
+    std::string video_codec;
+    std::string capture_backend;
+    std::string video_acceleration;
+    std::string backend;
+    std::string provider;
+    std::string device_name;
+};
+
 class PerformanceTelemetry {
 public:
     static constexpr std::size_t kSampleCapacity = 256;
@@ -79,6 +104,7 @@ public:
 
     void addSample(PerformanceStage stage, std::chrono::steady_clock::duration duration);
     void capturedFrame();
+    void displayedFrame();
     void processedFrame();
     void recordLatestSlotSequence(std::uint64_t previous_sequence, std::uint64_t latest_sequence);
     void recordCaptureWaitTimeout();
@@ -88,6 +114,8 @@ public:
     void evidenceAppendFailed();
     void setEvidenceQueueTelemetry(EvidenceQueueTelemetry telemetry);
     void setExecutionPath(ExecutionPathInfo info);
+    void setCaptureStreamInfo(CaptureStreamInfo info);
+    [[nodiscard]] OverlayMetrics overlayMetrics(int frame_width, int frame_height) const;
     void reset();
     void setBenchmarkMetadata(BenchmarkMetadata metadata);
     [[nodiscard]] std::string jsonReport() const;

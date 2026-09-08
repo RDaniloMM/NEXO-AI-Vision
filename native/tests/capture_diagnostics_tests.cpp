@@ -10,6 +10,7 @@
 #include "cuajone/capture.hpp"
 #include "cuajone/cli.hpp"
 
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -161,6 +162,24 @@ void testStableReasonMessages() {
     }
 }
 
+constexpr double fourcc(char a, char b, char c, char d) {
+    return static_cast<double>(static_cast<std::uint32_t>(a)
+        | (static_cast<std::uint32_t>(b) << 8U)
+        | (static_cast<std::uint32_t>(c) << 16U)
+        | (static_cast<std::uint32_t>(d) << 24U));
+}
+
+void testVideoCodecNames() {
+    require(videoCodecName(fourcc('H', '2', '6', '4')) == "H.264",
+        "H264 FOURCC did not map to the human-readable codec name");
+    require(videoCodecName(fourcc('a', 'v', 'c', '1')) == "H.264",
+        "avc1 FOURCC did not map case-insensitively to H.264");
+    require(videoCodecName(fourcc('h', 'e', 'v', 'c')) == "H.265/HEVC",
+        "HEVC FOURCC did not map to H.265/HEVC");
+    require(videoCodecName(0.0) == "No disponible",
+        "Missing FOURCC did not retain the explicit unavailable state");
+}
+
 }  // namespace
 
 int main() {
@@ -170,6 +189,7 @@ int main() {
         testConnectErrorClassification();
         testPreflightDecisionMapping();
         testStableReasonMessages();
+        testVideoCodecNames();
         std::cout << "PASS: capture diagnostics\n";
         return 0;
     } catch (const std::exception& error) {

@@ -48,6 +48,7 @@ inline constexpr std::chrono::milliseconds kRtspPreflightTimeout{2000};
     std::string_view host,
     std::uint16_t port,
     RtspReachabilityReason reason);
+[[nodiscard]] std::string videoCodecName(double fourcc);
 
 class LatestFrameCapture {
 public:
@@ -58,6 +59,7 @@ public:
         std::chrono::milliseconds open_timeout,
         std::chrono::milliseconds read_timeout,
         RtspTransport rtsp_transport,
+        VideoAcceleration video_acceleration,
         PerformanceTelemetry* telemetry = nullptr);
     ~LatestFrameCapture();
 
@@ -87,6 +89,7 @@ private:
     std::chrono::milliseconds open_timeout_;
     std::chrono::milliseconds read_timeout_;
     RtspTransport rtsp_transport_;
+    VideoAcceleration video_acceleration_;
     PerformanceTelemetry* telemetry_{};
     mutable std::mutex mutex_;
     std::condition_variable_any condition_;

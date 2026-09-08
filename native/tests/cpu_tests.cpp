@@ -477,12 +477,20 @@ void testCliUrlsAndInvariantDefense() {
     };
     auto valid = base;
     valid.insert(valid.end(), {"--max-det", "42", "--rtsp-transport", "udp",
+                               "--video-acceleration", "d3d11",
                                "--capture-open-timeout-ms", "0", "--device", "2"});
     const RuntimeConfig parsed = parse(valid);
     require(parsed.max_det == 42 && parsed.rtsp_transport == RtspTransport::Udp
+            && parsed.video_acceleration == VideoAcceleration::D3d11
             && parsed.capture_open_timeout.count() == 0 && parsed.device == 2
             && !parsed.performance_report,
         "CLI did not preserve max-det, transport, zero timeout, device, or telemetry default");
+    const RuntimeConfig defaults = parse(base);
+    require(defaults.rtsp_transport == RtspTransport::Tcp
+            && defaults.video_acceleration == VideoAcceleration::Auto
+            && defaults.capture_read_timeout == std::chrono::milliseconds(3000)
+            && defaults.evidence_writer_queue_capacity == 8,
+        "Stable capture and asynchronous evidence defaults changed");
     auto queued_evidence = base;
     queued_evidence.insert(queued_evidence.end(), {"--evidence-writer-queue-capacity", "4"});
     require(parse(queued_evidence).evidence_writer_queue_capacity == 4,
@@ -510,6 +518,7 @@ void testCliUrlsAndInvariantDefense() {
              std::vector<std::string>{"--preflight"},
              std::vector<std::string>{"--target-fps", "0"},
              std::vector<std::string>{"--rtsp-transport", "tcp"},
+             std::vector<std::string>{"--video-acceleration", "cpu"},
              std::vector<std::string>{"--reconnect-delay", "0"},
              std::vector<std::string>{"--max-reconnect-delay", "30"},
              std::vector<std::string>{"--capture-open-timeout-ms", "0"},
@@ -636,7 +645,9 @@ void testPerformanceTelemetry() {
         telemetry.addSample(PerformanceStage::PpeInference, std::chrono::milliseconds(milliseconds));
     }
     telemetry.addSample(PerformanceStage::PipelineTotal, std::chrono::milliseconds(17));
+    telemetry.addSample(PerformanceStage::PoseInference, std::chrono::milliseconds(13));
     telemetry.capturedFrame();
+    telemetry.displayedFrame();
     telemetry.processedFrame();
     telemetry.recordLatestSlotSequence(1, 5);
     telemetry.recordLatestSlotSequence(5, 8);
@@ -649,6 +660,8 @@ void testPerformanceTelemetry() {
         true, 2, 3, 2, 1, 0, 2, 1,
         std::chrono::milliseconds(7), std::chrono::milliseconds(11), true,
     });
+    telemetry.setCaptureStreamInfo({"H.264", "FFMPEG", "D3D11"});
+    const OverlayMetrics overlay = telemetry.overlayMetrics(1920, 1080);
     const std::string report = telemetry.jsonReport();
     require(report.find("\"ppe_inference\":{\"samples\":256,\"p50_ms\":129.000,\"p95_ms\":245.000,\"p99_ms\":255.000,\"max_ms\":257.000}") != std::string::npos,
         "Telemetry rolling window or percentile index changed");
@@ -661,6 +674,12 @@ void testPerformanceTelemetry() {
     require(report.find("\"evidence_writer_queue\":{\"mode\":\"async_fifo\",\"capacity\":2,\"accepted\":3,\"written\":2,\"failed\":1,\"current_depth\":0,\"high_water_depth\":2,\"blocked_enqueue_count\":1,\"blocked_enqueue_duration_ms\":7.000,\"drain_duration_ms\":11.000,\"terminal_failure\":true}") != std::string::npos
             && report.find("secret@example") == std::string::npos,
         "Telemetry queue report changed or exposed source data");
+    require(report.find("\"capture_stream\":{\"codec\":\"H.264\",\"backend\":\"FFMPEG\",\"video_acceleration\":\"D3D11\"}") != std::string::npos
+            && overlay.video_codec == "H.264" && overlay.capture_backend == "FFMPEG"
+            && overlay.video_acceleration == "D3D11" && overlay.frame_width == 1920
+            && overlay.frame_height == 1080 && overlay.pipeline_p50_ms == 17.0
+            && overlay.pose_inference_p50_ms == 13.0,
+        "Capture metadata or overlay latency metrics were not retained");
     require(performanceSourceMode("rtsp://secret@example/live") == "rtsp"
             && performanceSourceMode("frame.JPG") == "image"
             && performanceSourceMode("archive.mp4") == "video",

@@ -28,6 +28,7 @@ struct RuntimeConfig {
     bool compute_explicit{};
     bool target_fps_explicit{};
     bool rtsp_transport_explicit{};
+    bool video_acceleration_explicit{};
     bool reconnect_delay_explicit{};
     bool maximum_reconnect_delay_explicit{};
     bool capture_open_timeout_explicit{};
@@ -66,12 +67,13 @@ struct RuntimeConfig {
     double telemetry_interval_seconds{};
     std::size_t benchmark_warmup{10};
     std::size_t benchmark_iterations{100};
-    std::size_t evidence_writer_queue_capacity{};
+    std::size_t evidence_writer_queue_capacity{8};
     double reconnect_delay_seconds{5.0};
     double maximum_reconnect_delay_seconds{30.0};
     std::chrono::milliseconds capture_open_timeout{20000};
-    std::chrono::milliseconds capture_read_timeout{10000};
-    RtspTransport rtsp_transport{RtspTransport::Default};
+    std::chrono::milliseconds capture_read_timeout{3000};
+    RtspTransport rtsp_transport{RtspTransport::Tcp};
+    VideoAcceleration video_acceleration{VideoAcceleration::Auto};
     PpeConfig ppe;
     FallConfig fall;
 };

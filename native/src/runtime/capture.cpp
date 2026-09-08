@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -233,7 +234,40 @@ std::string safeEndpoint(std::string_view host, std::uint16_t port) {
         + ":" + std::to_string(port);
 }
 
+std::string videoAccelerationName(double raw_value) {
+    if (!std::isfinite(raw_value)) return "No disponible";
+    switch (static_cast<int>(std::lround(raw_value))) {
+        case cv::VIDEO_ACCELERATION_NONE: return "CPU";
+        case cv::VIDEO_ACCELERATION_ANY: return "Automatica";
+        case cv::VIDEO_ACCELERATION_D3D11: return "D3D11";
+        case cv::VIDEO_ACCELERATION_VAAPI: return "VAAPI";
+        case cv::VIDEO_ACCELERATION_MFX: return "MFX";
+        default: return "No disponible";
+    }
+}
+
 }  // namespace
+
+std::string videoCodecName(double raw_fourcc) {
+    if (!std::isfinite(raw_fourcc) || raw_fourcc <= 0.0
+        || raw_fourcc > static_cast<double>(std::numeric_limits<std::uint32_t>::max())) {
+        return "No disponible";
+    }
+    const auto value = static_cast<std::uint32_t>(std::llround(raw_fourcc));
+    std::string fourcc(4, ' ');
+    for (std::size_t index = 0; index < fourcc.size(); ++index) {
+        const unsigned char character = static_cast<unsigned char>((value >> (index * 8U)) & 0xFFU);
+        if (std::isprint(character) == 0) return "No disponible";
+        fourcc[index] = static_cast<char>(std::toupper(character));
+    }
+    if (fourcc == "H264" || fourcc == "X264" || fourcc == "AVC1") return "H.264";
+    if (fourcc == "H265" || fourcc == "HEVC" || fourcc == "HEV1" || fourcc == "HVC1") {
+        return "H.265/HEVC";
+    }
+    if (fourcc == "MJPG" || fourcc == "JPEG") return "MJPEG";
+    if (fourcc == "MP4V") return "MPEG-4 Part 2";
+    return fourcc;
+}
 
 RtspReachabilityReason classifyRtspConnectError(int native_error) noexcept {
 #ifdef _WIN32
@@ -324,6 +358,7 @@ LatestFrameCapture::LatestFrameCapture(
     std::chrono::milliseconds open_timeout,
     std::chrono::milliseconds read_timeout,
     RtspTransport rtsp_transport,
+    VideoAcceleration video_acceleration,
     PerformanceTelemetry* telemetry)
     : source_(std::move(source)),
       reconnect_delay_(reconnect_delay),
@@ -331,6 +366,7 @@ LatestFrameCapture::LatestFrameCapture(
        open_timeout_(open_timeout),
        read_timeout_(read_timeout),
        rtsp_transport_(rtsp_transport),
+       video_acceleration_(video_acceleration),
        telemetry_(telemetry) {
     if (source_.empty()) throw std::invalid_argument("Capture source must not be empty");
     if (!std::isfinite(reconnect_delay_.count()) || reconnect_delay_.count() < 0.0
@@ -448,6 +484,9 @@ void LatestFrameCapture::readerLoop(std::stop_token stop_token) {
             std::scoped_lock lock(mutex_);
             error_ = "OpenCV could not read the image source";
         } else {
+            if (telemetry_ != nullptr) {
+                telemetry_->setCaptureStreamInfo({"Imagen fija", "OpenCV imgcodecs", "No aplica"});
+            }
             publish(std::move(image));
         }
         {
@@ -508,10 +547,31 @@ void LatestFrameCapture::readerLoop(std::stop_token stop_token) {
                 parameters.insert(parameters.end(), {
                     cv::CAP_PROP_READ_TIMEOUT_MSEC, static_cast<int>(read_timeout_.count())});
             }
+            const std::vector<int> base_parameters = parameters;
+            if (rtsp) {
+                int acceleration = cv::VIDEO_ACCELERATION_ANY;
+                if (video_acceleration_ == VideoAcceleration::D3d11) {
+                    acceleration = cv::VIDEO_ACCELERATION_D3D11;
+                } else if (video_acceleration_ == VideoAcceleration::Cpu) {
+                    acceleration = cv::VIDEO_ACCELERATION_NONE;
+                }
+                parameters.insert(parameters.end(), {
+                    cv::CAP_PROP_HW_ACCELERATION, acceleration});
+            }
             opened = parameters.empty()
                 ? capture.open(source_, cv::CAP_FFMPEG)
                 : capture.open(source_, cv::CAP_FFMPEG, parameters);
-            if (!opened && !parameters.empty()) {
+            if (!opened && video_acceleration_ != VideoAcceleration::Cpu
+                && parameters != base_parameters) {
+                capture.release();
+                std::vector<int> software_parameters = base_parameters;
+                software_parameters.insert(software_parameters.end(), {
+                    cv::CAP_PROP_HW_ACCELERATION, cv::VIDEO_ACCELERATION_NONE});
+                opened = software_parameters.empty()
+                    ? capture.open(source_, cv::CAP_FFMPEG)
+                    : capture.open(source_, cv::CAP_FFMPEG, software_parameters);
+            }
+            if (!opened && !base_parameters.empty()) {
                 capture.release();
                 opened = capture.open(source_, cv::CAP_FFMPEG);
             }
@@ -534,6 +594,18 @@ void LatestFrameCapture::readerLoop(std::stop_token stop_token) {
             condition_.notify_all();
         } else {
             capture.set(cv::CAP_PROP_BUFFERSIZE, 1);
+            if (telemetry_ != nullptr) {
+                std::string backend = "No disponible";
+                try {
+                    backend = capture.getBackendName();
+                } catch (const cv::Exception&) {
+                }
+                telemetry_->setCaptureStreamInfo({
+                    videoCodecName(capture.get(cv::CAP_PROP_FOURCC)),
+                    std::move(backend),
+                    videoAccelerationName(capture.get(cv::CAP_PROP_HW_ACCELERATION)),
+                });
+            }
             delay = reconnect_delay_;
             const double source_fps = isRtsp() ? 0.0 : capture.get(cv::CAP_PROP_FPS);
             const bool pace_offline_video = source_fps > 0.0 && source_fps <= 240.0;
