@@ -61,7 +61,7 @@ if(WIN32 AND (CUAJONE_BUILD_LAUNCHER OR CUAJONE_BUILD_RUNTIME))
     add_custom_target(cuajone_product_icon DEPENDS "${CUAJONE_PRODUCT_ICON}")
 endif()
 
-if(CUAJONE_BUILD_LAUNCHER)
+if(CUAJONE_BUILD_LAUNCHER AND NOT UNIX)
     add_library(cuajone_launcher_support
         src/launcher/launcher_support.cpp
     )
@@ -96,6 +96,16 @@ if(CUAJONE_BUILD_LAUNCHER)
     endif()
 endif()
 
+if(UNIX AND CUAJONE_ENABLE_TENSORRT)
+    # Linux Fase 0: no CUDA/TensorRT toolchain yet (lands in Fase 3).
+    # Forcing OFF keeps bare configures working; set TENSORRT_ROOT/CUDA_ROOT
+    # only once Fase 3 provisioning exists (see native/activate-native.sh).
+    message(STATUS
+        "Linux Fase 0: TensorRT backend disabled "
+        "(CUAJONE_ENABLE_TENSORRT forced OFF until Fase 3)")
+    set(CUAJONE_ENABLE_TENSORRT OFF)
+endif()
+
 if(CUAJONE_BUILD_RUNTIME AND CUAJONE_ENABLE_TENSORRT)
     set(TENSORRT_ROOT "" CACHE PATH "TensorRT 11 C++ SDK root containing include/ and lib/")
     if(NOT TENSORRT_ROOT OR TENSORRT_ROOT STREQUAL "")
@@ -104,7 +114,13 @@ if(CUAJONE_BUILD_RUNTIME AND CUAJONE_ENABLE_TENSORRT)
     endif()
 endif()
 
-find_package(OpenCV 4.8 REQUIRED COMPONENTS core imgproc)
+# Ubuntu 24.04 apt ships OpenCV 4.6 via libopencv-dev; the core/imgproc API
+# surface used by the portable libraries is stable across 4.6+.
+set(CUAJONE_OPENCV_MIN_VERSION "4.8")
+if(UNIX)
+    set(CUAJONE_OPENCV_MIN_VERSION "4.6")
+endif()
+find_package(OpenCV ${CUAJONE_OPENCV_MIN_VERSION} REQUIRED COMPONENTS core imgproc)
 
 set(CUAJONE_BYTE_TRACK_COMMIT "a865158906f6138465668810a98ffd918d95f9a3")
 set(CUAJONE_EIGEN_COMMIT "3147391d946bb4b6c68edd901f2add6ac1f31f8c")
@@ -252,7 +268,21 @@ if(CUAJONE_BUILD_TESTS)
             ENVIRONMENT_MODIFICATION
                 "PATH=path_list_prepend:$<TARGET_FILE_DIR:opencv_core>")
     endif()
-    if(CUAJONE_BUILD_LAUNCHER)
+    if(UNIX AND CUAJONE_BUILD_LAUNCHER)
+        # Linux Fase 0: the Win32 launcher (launcher.cpp/launcher_support.cpp
+        # include <windows.h> unconditionally) is excluded. The Qt6 GUI
+        # replacement lands in Fase 2; see docs/LinuxPort.md.
+        message(STATUS
+            "Linux Fase 0: Win32 launcher excluded (Qt6 GUI lands in Fase 2); "
+            "building portable core libraries and cpu_tests only")
+    endif()
+
+    # Linux Fase 0: launcher_tests need cuajone_launcher_support (<windows.h>)
+    # and Win32 .rc fixtures; excluded until the Fase 2 Qt6 GUI. Likewise,
+    # capture_diagnostics_tests needs a POSIX reachability port (Fase 1) and
+    # evidence/onnx tests need the runtime port + Linux ORT package (Fase 1),
+    # so they stay inside the Windows-only runtime block below.
+    if(CUAJONE_BUILD_LAUNCHER AND NOT UNIX)
         add_executable(cuajone_launcher_tests tests/launcher_tests.cpp)
         if(WIN32)
             target_sources(cuajone_launcher_tests PRIVATE tests/launcher_version_fixture.rc)
@@ -282,7 +312,19 @@ if(CUAJONE_BUILD_TESTS)
     endif()
 endif()
 
-if(CUAJONE_BUILD_RUNTIME)
+if(UNIX AND CUAJONE_BUILD_RUNTIME)
+    # Linux Fase 0: the native runtime (capture/evidence/model_manifest include
+    # <windows.h>/<bcrypt.h>/<winsock2.h> unconditionally; installer custom
+    # action needs msiquery.h) is excluded. The POSIX port lands in Fase 1 and
+    # the Qt6 GUI + packaging in Fase 2; see docs/LinuxPort.md. Nothing below
+    # uses FATAL_ERROR on UNIX for this: absence of the runtime is expected.
+    message(STATUS
+        "Linux Fase 0: native runtime excluded "
+        "(POSIX port lands in Fase 1, Qt6 GUI + packaging in Fase 2); "
+        "portable core libraries and cpu_tests still build")
+endif()
+
+if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
     if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
         message(FATAL_ERROR "The native runtime currently supports Windows x64 only")
     endif()

@@ -1,2 +1,4 @@
 # Patch files must stay LF so `git apply --no-index` works on Windows and CI
 *.patch text eol=lf
+# Shell activation scripts must stay LF so the shebang survives on Linux
+*.sh text eol=lf

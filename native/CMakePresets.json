@@ -22,6 +22,24 @@
       }
     },
     {
+      "name": "linux-release",
+      "displayName": "Linux portable core + cpu_tests (Fase 0, no runtime/launcher)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../.tools/native/build/presets/linux-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CUAJONE_BUILD_RUNTIME": "ON",
+        "CUAJONE_BUILD_TESTS": "ON",
+        "CUAJONE_BUILD_LAUNCHER": "OFF",
+        "CUAJONE_ENABLE_TENSORRT": "OFF",
+        "ONNXRUNTIME_ROOT": "",
+        "OpenCV_DIR": "",
+        "TENSORRT_ROOT": ""
+      }
+    },
+    {
       "name": "cpu-tests",
       "displayName": "CPU tests without CUDA or TensorRT",
       "generator": "Ninja",
@@ -75,6 +93,10 @@
   ],
   "buildPresets": [
     {
+      "name": "linux-release",
+      "configurePreset": "linux-release"
+    },
+    {
       "name": "windows-msvc-release",
       "configurePreset": "windows-msvc"
     },
@@ -93,6 +115,11 @@
     }
   ],
   "testPresets": [
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release",
+      "output": { "outputOnFailure": true }
+    },
     {
       "name": "cpu-tests-release",
       "configurePreset": "cpu-tests",

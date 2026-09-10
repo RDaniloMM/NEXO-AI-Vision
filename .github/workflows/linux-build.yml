@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Linux Fase 0 port build (DGX OS / Ubuntu 24.04, GCC 13, Ninja).
+#
+# Scope: portable core libraries + cuajone_cpu_tests via the `linux-release`
+# preset. There is NO CUAJONE_ENABLE_ONNX-style flag in native/CMakeLists.txt
+# (verified): the Windows-only runtime block (ORT, capture, evidence,
+# model_manifest, installer CA, launcher) is skipped on UNIX by the Fase 0
+# branch, and cpu_tests links only cuajone_core, so no ONNX Runtime package
+# is needed here. evidence/onnx/capture_diagnostics tests arrive with the
+# Fase 1 POSIX port; the Qt6 GUI with Fase 2. See docs/LinuxPort.md.
+
+name: Linux build (Fase 0)
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-fase0:
+    name: Portable core + cpu_tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache native dependencies
+        uses: actions/cache@v4
+        with:
+          path: .tools/native/dependencies
+          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-cuajone.patch') }}
+
+      - name: Install toolchain and OpenCV
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config \
+            libopencv-dev git patch unzip curl ca-certificates
+          # qt6-base-dev is intentionally absent: the Qt6 GUI lands in Fase 2.
+
+      - name: Show toolchain versions
+        run: |
+          gcc --version | head -n 1
+          cmake --version | head -n 1
+          ninja --version
+          pkg-config --modversion opencv4
+
+      - name: Provision tracking dependencies (ByteTrack-Eigen + Eigen)
+        # Bash mirror of native/Provision-TrackingDependencies.ps1: verified
+        # archives, pinned hashes, patch via `git apply`, receipt JSONs that
+        # native/CMakeLists.txt validates at configure time.
+        run: |
+          set -euo pipefail
+          BYTE_TRACK_COMMIT="a865158906f6138465668810a98ffd918d95f9a3"
+          EIGEN_COMMIT="3147391d946bb4b6c68edd901f2add6ac1f31f8c"
+          BYTE_TRACK_SHA="e5a075df5e8b4ed4bb7436ffe7fe0f4cee5c6a6663112d6a1c47a99ffb704d88"
+          EIGEN_SHA="9eec4ec4e5e459b2f59dbbaa4280e1bb3ee61cccd8a7c0af0321d29d95fece9e"
+          TOOL_ROOT="${{ github.workspace }}/.tools/native"
+          DOWNLOAD_ROOT="$TOOL_ROOT/downloads"
+          DEPENDENCY_ROOT="$TOOL_ROOT/dependencies"
+          TEMP_ROOT="$TOOL_ROOT/temp/tracking-dependencies"
+          PATCH_PATH="${{ github.workspace }}/native/third_party/byte-track-eigen-cuajone.patch"
+          mkdir -p "$DOWNLOAD_ROOT" "$DEPENDENCY_ROOT"
+          PATCH_SHA="$(sha256sum "$PATCH_PATH" | cut -d' ' -f1)"
+
+          fetch_verified() {
+            local url="$1" path="$2" expected="$3" description="$4"
+            if [ ! -f "$path" ]; then
+              curl -fsSL -o "$path" "$url"
+            fi
+            local actual
+            actual="$(sha256sum "$path" | cut -d' ' -f1)"
+            if [ "$actual" != "$expected" ]; then
+              echo "$description archive SHA-256 mismatch: expected $expected, got $actual" >&2
+              exit 1
+            fi
+          }
+
+          provision() {
+            local archive="$1" target="$2" root_name="$3" marker="$4" apply_patch="$5"
+            local receipt="$target/.cuajone-source-receipt.json"
+            local archive_sha
+            archive_sha="$(sha256sum "$archive" | cut -d' ' -f1)"
+            if [ -f "$target/$marker" ] && [ -f "$receipt" ] \
+              && grep -q "\"archive_sha256\":\"$archive_sha\"" "$receipt" \
+              && grep -q "\"patch_sha256\":\"$PATCH_SHA\"" "$receipt" \
+              && { [ "$apply_patch" -eq 0 ] || grep -q "retained_track_count" "$target/$marker"; }; then
+              echo "Tracking dependency cache hit: $target"
+              return 0
+            fi
+            rm -rf "$target" "$TEMP_ROOT"
+            mkdir -p "$TEMP_ROOT"
+            unzip -q "$archive" -d "$TEMP_ROOT"
+            local expanded="$TEMP_ROOT/$root_name"
+            if [ ! -d "$expanded" ]; then
+              echo "Verified dependency archive did not contain expected root: $root_name" >&2
+              exit 1
+            fi
+            if [ "$apply_patch" -eq 1 ]; then
+              (
+                cd "$expanded"
+                GIT_CEILING_DIRECTORIES="$TEMP_ROOT" git apply --no-index --check "$PATCH_PATH"
+                GIT_CEILING_DIRECTORIES="$TEMP_ROOT" git apply --no-index "$PATCH_PATH"
+              )
+            fi
+            mv "$expanded" "$target"
+            printf '{"archive_sha256":"%s","patch_sha256":"%s"}' "$archive_sha" "$PATCH_SHA" > "$receipt"
+          }
+
+          fetch_verified \
+            "https://codeload.github.com/cj-mills/byte-track-eigen/zip/$BYTE_TRACK_COMMIT" \
+            "$DOWNLOAD_ROOT/byte-track-eigen-$BYTE_TRACK_COMMIT.zip" \
+            "$BYTE_TRACK_SHA" "ByteTrack-Eigen 2.1.0"
+          fetch_verified \
+            "https://gitlab.com/libeigen/eigen/-/archive/$EIGEN_COMMIT/eigen-$EIGEN_COMMIT.zip" \
+            "$DOWNLOAD_ROOT/eigen-$EIGEN_COMMIT.zip" \
+            "$EIGEN_SHA" "Eigen 3.4.0"
+          provision \
+            "$DOWNLOAD_ROOT/byte-track-eigen-$BYTE_TRACK_COMMIT.zip" \
+            "$DEPENDENCY_ROOT/byte-track-eigen-$BYTE_TRACK_COMMIT" \
+            "byte-track-eigen-$BYTE_TRACK_COMMIT" "include/BYTETracker.h" 1
+          provision \
+            "$DOWNLOAD_ROOT/eigen-$EIGEN_COMMIT.zip" \
+            "$DEPENDENCY_ROOT/eigen-$EIGEN_COMMIT" \
+            "eigen-$EIGEN_COMMIT" "Eigen/Dense" 0
+          echo "Tracking dependencies verified under $DEPENDENCY_ROOT"
+
+      - name: Configure (linux-release preset)
+        working-directory: native
+        run: cmake --preset linux-release
+
+      - name: Build (linux-release preset)
+        working-directory: native
+        run: cmake --build --preset linux-release
+
+      - name: Run native tests (CTest)
+        working-directory: native
+        run: ctest --preset linux-release --output-on-failure
