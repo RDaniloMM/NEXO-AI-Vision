@@ -844,9 +844,9 @@ void drawPerformancePanelOnCanvas(
     const cv::Rect panel(tile.x, tile.y, width, height);
     const cv::Rect clipped = panel & cv::Rect(0, 0, canvas.cols, canvas.rows);
     if (clipped.empty()) return;
-    cv::Mat pixels = canvas(clipped);
-    cv::Mat black(pixels.size(), pixels.type(), cv::Scalar(0, 0, 0));
-    cv::addWeighted(black, 0.62, pixels, 0.38, 0.0, pixels);
+    // Solid fill instead of an alpha blend: no per-compose addWeighted, and
+    // the values shown refresh at the cached ~2 Hz metrics rate.
+    cv::rectangle(canvas, clipped, cv::Scalar(0, 0, 0), cv::FILLED);
     const std::vector<std::string> lines{
         "Fotogramas por segundo: " + std::format("{:.2f}", metrics.displayed_fps),
         "Codec de video: " + (metrics.video_codec.empty() ? "No disponible" : metrics.video_codec),
@@ -972,6 +972,9 @@ int monitor(
         AnalyticsMode last_analytics_mode{AnalyticsMode::PpeFall};
         OverlayMetrics last_metrics{};
         bool has_metrics{};
+        // Performance panel cache: refreshed at ~2 Hz so N-camera inference
+        // bursts never re-query telemetry per frame.
+        Clock::time_point last_metrics_at{Clock::time_point::min()};
         bool last_connected{true};
         bool first_inference_logged{};
         bool display_dirty{};
@@ -995,17 +998,19 @@ int monitor(
     }
     const GridLayout grid_layout = computeGridLayout(sources.size());
     // Cap the composed canvas width so the single window stays manageable.
-    constexpr int kMaxCanvasWidth = 1920;
+    // 1280x720 (16:9) keeps two-camera mosaics cheap; tiles never upscale
+    // (pasteLetterboxed caps scale at 1.0 for pixel-perfect 1:1 video).
+    constexpr int kMaxCanvasWidth = 1280;
     // Fixed 16:9 display canvas. The Win32 HighGUI backend stretches a
     // WINDOW_NORMAL image to the window client area, so a raw grid canvas
-    // (e.g. 1920x540 for a 1x2 mosaic) is stretched vertically ~2x when the
-    // ~16:9 window is maximized. Centering the grid on a 1920x1080 canvas
+    // (e.g. 1280x360 for a 1x2 mosaic) is stretched vertically ~2x when the
+    // ~16:9 window is maximized. Centering the grid on a 1280x720 canvas
     // makes maximized display ~1:1: HighGUI borders would appear instead of
     // deformation on backends honoring KEEPRATIO, and Win32 shows black
     // letterbox bars baked into the frame. Grid layouts never exceed these
-    // bounds (rows <= cols, so height <= 1080), so centering offsets are >= 0.
-    constexpr int kDisplayWidth = 1920;
-    constexpr int kDisplayHeight = 1080;
+    // bounds (rows <= cols, so height <= 720), so centering offsets are >= 0.
+    constexpr int kDisplayWidth = 1280;
+    constexpr int kDisplayHeight = 720;
     const int base_cell_width = grid_layout.cols == 0
         ? kMaxCanvasWidth
         : std::max(160, kMaxCanvasWidth / static_cast<int>(grid_layout.cols));
@@ -1020,6 +1025,16 @@ int monitor(
     std::vector<double> last_composed_cols;
     std::vector<double> last_composed_rows;
     bool grid_shown{};
+    // Display is decoupled from inference: the grid is composed at most every
+    // kMinComposeInterval (~15 fps), so inference bursts never drive one
+    // imshow per inference. Interaction (divider drag, weight keys) still
+    // forces a compose so resizing stays responsive.
+    constexpr auto kMinComposeInterval = std::chrono::milliseconds(66);
+    // Cached performance panel refreshes at ~2 Hz; every compose shows the
+    // latest cached values without re-querying telemetry per inference.
+    constexpr auto kMetricsRefreshInterval = std::chrono::milliseconds(500);
+    auto last_compose = Clock::time_point::min();
+    auto last_poll = Clock::time_point::min();
     const std::chrono::duration<double> telemetry_interval(config.telemetry_interval_seconds);
     const bool periodic_telemetry = telemetry != nullptr && telemetry_interval.count() > 0.0;
     auto next_snapshot = Clock::now() + telemetry_interval;
@@ -1074,9 +1089,14 @@ int monitor(
                             cv::Mat(720, 1280, CV_8UC3, cv::Scalar(24, 24, 24));
                     }
                     if (config.performance_report && telemetry != nullptr) {
-                        source.last_metrics = telemetry->overlayMetrics(
-                            source.last_displayed_frame.cols, source.last_displayed_frame.rows);
-                        source.has_metrics = true;
+                        const auto metrics_now = Clock::now();
+                        if (!source.has_metrics
+                            || metrics_now - source.last_metrics_at >= kMetricsRefreshInterval) {
+                            source.last_metrics = telemetry->overlayMetrics(
+                                source.last_displayed_frame.cols, source.last_displayed_frame.rows);
+                            source.has_metrics = true;
+                            source.last_metrics_at = metrics_now;
+                        }
                     }
                     source.last_connected = false;
                     source.display_dirty = true;
@@ -1136,13 +1156,18 @@ int monitor(
                               << " | people: " << processed.canonical.people.size() << '\n';
                     source.first_inference_logged = true;
                 }
-                // Clean display copy taken BEFORE small-frame annotation, so the
-                // canvas can paste pristine video pixel-perfect and redraw every
-                // overlay at canvas resolution. Evidence keeps using the annotated
-                // frame below; inference and telemetry order are unchanged.
-                cv::Mat clean_for_display;
-                if (config.show_window) clean_for_display = frame.clone();
-                if (canonicalFrameNeedsRender(config.show_window, processed.canonical)) {
+                // Single render path: when a window is shown the small frame is
+                // never annotated here (no per-inference boxes/putText and no
+                // frame.clone()); every overlay is redrawn once per compose at
+                // canvas resolution. Headless keeps the small-frame drawing so
+                // evidence frames stay annotated.
+                if (config.show_window) {
+                    source.last_people = processed.canonical.people;
+                    source.last_associations = processed.associations;
+                    source.last_keypoint_threshold =
+                        std::clamp(config.pose_confidence, 0.25F, 0.50F);
+                    source.last_analytics_mode = config.analytics_mode;
+                } else if (canonicalFrameNeedsRender(false, processed.canonical)) {
                     const auto render_started = telemetry == nullptr ? Clock::time_point{} : Clock::now();
                     const float keypoint_threshold = std::clamp(config.pose_confidence, 0.25F, 0.50F);
                     for (const auto& person : processed.canonical.people) {
@@ -1155,15 +1180,6 @@ int monitor(
                         }
                     }
                     if (telemetry != nullptr) telemetry->addSample(PerformanceStage::Render, Clock::now() - render_started);
-                    if (config.show_window) {
-                        source.last_people = processed.canonical.people;
-                        source.last_associations = processed.associations;
-                        source.last_keypoint_threshold = keypoint_threshold;
-                        source.last_analytics_mode = config.analytics_mode;
-                    }
-                } else if (config.show_window) {
-                    source.last_people.clear();
-                    source.last_associations.clear();
                 }
                 EvidenceWriterQueue::AnnotatedFrame queued_frame;
                 if (evidence_queue && !processed.canonical.events.empty()) {
@@ -1197,27 +1213,35 @@ int monitor(
                 }
                 if (config.show_window) {
                     if (config.performance_report && telemetry != nullptr) {
-                        telemetry->displayedFrame();
-                        source.last_metrics = telemetry->overlayMetrics(frame.cols, frame.rows);
-                        source.has_metrics = true;
+                        // ~2 Hz cache; displayedFrame() moved to compose time so
+                        // displayed_fps measures composed frames, not inferences.
+                        const auto metrics_now = Clock::now();
+                        if (!source.has_metrics
+                            || metrics_now - source.last_metrics_at >= kMetricsRefreshInterval) {
+                            source.last_metrics = telemetry->overlayMetrics(frame.cols, frame.rows);
+                            source.has_metrics = true;
+                            source.last_metrics_at = metrics_now;
+                        }
                     } else if (!config.performance_report) {
                         source.has_metrics = false;
                     }
                     source.last_connected = true;
-                    // Store the CLEAN frame; the single grid canvas is composed
-                    // once per loop below and every overlay is redrawn there at
-                    // canvas resolution. A failed decode never clears this
-                    // slot, so the grid keeps the last good tile.
-                    source.last_displayed_frame = clean_for_display.empty() ? frame : clean_for_display;
+                    // Store the frame by reference (no clone): it is no longer
+                    // annotated above when a window is shown, and the evidence
+                    // queue clones only when events exist.
+                    source.last_displayed_frame = frame;
                     source.display_dirty = true;
                 }
             }
         }
+        bool composed = false;
         if (config.show_window) {
             // Refresh while dragging, on weight changes (mouse or '+/-' keys),
             // and while a hover label is visible so it hides on timeout.
-            // Otherwise compose only on new frames. Composition runs only
-            // when show_window is set; headless runs never allocate a canvas.
+            // Otherwise compose only on new frames, at most every
+            // kMinComposeInterval: imshow is decoupled from inference.
+            // Composition runs only when show_window is set; headless runs
+            // never allocate a canvas.
             const auto now_for_dirty = Clock::now();
             const bool hover_visible = mosaic.hover_tile >= 0
                 && mosaic.hover_time != Clock::time_point::min()
@@ -1228,7 +1252,10 @@ int monitor(
                 || std::ranges::any_of(sources, [](const SourceState& source) {
                         return source.display_dirty;
                     });
-            if (grid_dirty && grid_layout.cols > 0) {
+            const bool time_for_compose = !grid_shown
+                || now_for_dirty - last_compose >= kMinComposeInterval;
+            if (grid_dirty && grid_layout.cols > 0
+                && (time_for_compose || weights_changed || mosaic.dragging)) {
                 mosaic.tile_rects = weightedTileRects(
                     grid_layout, mosaic.col_weights, mosaic.row_weights,
                     canvas_width, canvas_height);
@@ -1244,6 +1271,7 @@ int monitor(
                 }
                 cv::Mat display(kDisplayHeight, kDisplayWidth, CV_8UC3, cv::Scalar(0, 0, 0));
                 const auto compose_time = Clock::now();
+                const auto render_started = telemetry == nullptr ? Clock::time_point{} : Clock::now();
                 for (std::size_t index = 0; index < sources.size()
                     && index < mosaic.tile_rects.size(); ++index) {
                     auto& source = sources[index];
@@ -1301,16 +1329,33 @@ int monitor(
                     "Drag divider: resize | +/-: focused tile | [/]: focus | 0: reset | hover: name | q/Esc: quit",
                     {display_dx + 12, display.rows - 10}, cv::FONT_HERSHEY_SIMPLEX, 0.5,
                     cv::Scalar(220, 220, 220), 1, cv::LINE_AA);
+                if (telemetry != nullptr) telemetry->addSample(PerformanceStage::Render, Clock::now() - render_started);
                 cv::imshow(kLiveAnalyticsWindowTitle, display);
+                // Displayed frames are counted per compose, not per inference,
+                // so displayed_fps truthfully reports the composed output rate.
+                if (telemetry != nullptr) telemetry->displayedFrame();
+                last_compose = Clock::now();
+                composed = true;
                 grid_shown = true;
                 last_composed_cols = mosaic.col_weights;
                 last_composed_rows = mosaic.row_weights;
             }
         }
         if (!any_running) break;
-        if (config.show_window && pollLiveWindow(mosaic, kLiveAnalyticsWindowTitle)) {
-            stop_requested.store(true, std::memory_order_relaxed);
-        } else if (!received_any && !config.show_window) {
+        bool polled = false;
+        if (config.show_window) {
+            // One waitKey per compose (plus an idle keepalive so the window
+            // stays responsive with no new frames); never one per inference.
+            const auto now_for_poll = Clock::now();
+            if (composed || now_for_poll - last_poll >= kMinComposeInterval) {
+                last_poll = now_for_poll;
+                polled = true;
+                if (pollLiveWindow(mosaic, kLiveAnalyticsWindowTitle)) {
+                    stop_requested.store(true, std::memory_order_relaxed);
+                }
+            }
+        }
+        if (!polled && !received_any) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
     }

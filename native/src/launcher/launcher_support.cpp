@@ -990,7 +990,7 @@ void saveOperatorPreferencesAtomic(
 std::vector<std::string_view> visibleLauncherControlKeys() {
     return {
         "camera_profile_list", "camera_profile_new", "camera_profile_edit",
-        "camera_profile_delete", "camera_profile_select_all", "output",
+        "camera_profile_delete", "camera_profile_select_all", "video_file", "output",
         "ppe_profile_modal", "advanced_settings_modal", "language_icon", "theme_icon",
         "validate", "start", "stop", "status", "log_path",
     };

@@ -1036,33 +1036,37 @@ void createControls(LauncherWindow& state) {
         L"Selected cameras share one inference engine; tracking remains isolated per camera.",
         L"Las cámaras seleccionadas comparten un motor de inferencia; el seguimiento se aísla por cámara.");
 
-    const HWND output_label = createLabel(state, L"Output folder", 16, 336, 120);
-    addLocalizedText(state, output_label, L"Output folder", L"Carpeta de salida");
-    state.output = createEdit(state, OutputEdit, 146, 332, 620);
-    addLocalizedText(state, createBrowseButton(state, OutputBrowse, 332), L"Browse...", L"Explorar...");
+    const HWND output_label = createLabel(state, L"Video file (optional)", 16, 328, 120);
+    addLocalizedText(state, output_label, L"Video file (optional)", L"Archivo de video (opcional)");
+    state.source = createEdit(state, SourceEdit, 146, 324, 620);
+    addLocalizedText(state, createBrowseButton(state, SourceBrowse, 324), L"Browse...", L"Explorar...");
+    const HWND output_folder_label = createLabel(state, L"Output folder", 16, 364, 120);
+    addLocalizedText(state, output_folder_label, L"Output folder", L"Carpeta de salida");
+    state.output = createEdit(state, OutputEdit, 146, 360, 620);
+    addLocalizedText(state, createBrowseButton(state, OutputBrowse, 360), L"Browse...", L"Explorar...");
 
     // PPE profile, advanced settings and .env import live only in the Menu popup
     // (see showLauncherMenu); the main layout keeps Validate/Start/Stop here.
     state.validate = createControl(state, 0, L"BUTTON", L"Validate", WS_TABSTOP | BS_OWNERDRAW,
-        146, 374, 110, 32, ValidateButton);
+        146, 402, 110, 32, ValidateButton);
     addLocalizedText(state, state.validate, L"Validate", L"Validar");
     state.start = createControl(state, 0, L"BUTTON", L"Start", WS_TABSTOP | BS_OWNERDRAW,
-        270, 374, 110, 32, StartButton);
+        270, 402, 110, 32, StartButton);
     addLocalizedText(state, state.start, L"Start", L"Iniciar");
     state.stop = createControl(state, 0, L"BUTTON", L"Stop", WS_TABSTOP | BS_OWNERDRAW,
-        394, 374, 110, 32, StopButton);
+        394, 402, 110, 32, StopButton);
     addLocalizedText(state, state.stop, L"Stop", L"Detener");
     EnableWindow(state.stop, FALSE);
 
-    const HWND status_label = createLabel(state, L"Status", 16, 422, 120);
+    const HWND status_label = createLabel(state, L"Status", 16, 450, 120);
     addLocalizedText(state, status_label, L"Status", L"Estado");
     state.status = createControl(state, WS_EX_CLIENTEDGE, L"STATIC", L"Ready", SS_LEFT | SS_CENTERIMAGE,
-        146, 418, 724, 32, StatusText);
-    const HWND log_label = createLabel(state, L"Log path", 16, 462, 120);
+        146, 446, 724, 32, StatusText);
+    const HWND log_label = createLabel(state, L"Log path", 16, 490, 120);
     addLocalizedText(state, log_label, L"Log path", L"Ruta del log");
-    state.log_path = createEdit(state, LogPathEdit, 146, 458, 620, true);
+    state.log_path = createEdit(state, LogPathEdit, 146, 486, 620, true);
     const HWND open_log = createControl(state, 0, L"BUTTON", L"Open log", WS_TABSTOP | BS_OWNERDRAW,
-        778, 458, 92, 25, OpenLogButton);
+        778, 486, 92, 25, OpenLogButton);
     addLocalizedText(state, open_log, L"Open log", L"Abrir log");
 
     state.program_data = knownProgramData();
@@ -1131,8 +1135,19 @@ void loadEnv(LauncherWindow& state) {
     const auto values = readEnvFile(env_path);
     std::optional<CameraConnectionProfile> imported_camera;
     if (const auto source = envValue(values, L"RTSP_URL")) {
-        const std::wstring name = envValue(values, L"CAMERA_ID").value_or(L"CAMARA_IMPORTADA");
-        imported_camera = parseLegacyCameraUrl(*source, name);
+        const bool looks_rtsp = source->rfind(L"rtsp://", 0) == 0 || source->rfind(L"rtsps://", 0) == 0;
+        std::filesystem::path candidate(*source);
+        if (!looks_rtsp && candidate.is_relative()) candidate = resolveEnvPath(env_path, *source);
+        std::error_code candidate_error;
+        if (!looks_rtsp && std::filesystem::is_regular_file(candidate, candidate_error)
+            && !candidate_error) {
+            // A local video file flows through the video field instead of a
+            // camera profile; buildLaunchPlan validates it as a file source.
+            setText(state.source, candidate);
+        } else {
+            const std::wstring name = envValue(values, L"CAMERA_ID").value_or(L"CAMARA_IMPORTADA");
+            imported_camera = parseLegacyCameraUrl(*source, name);
+        }
     }
     if (const auto output = envValue(values, L"OUTPUT_DIR")) {
         setText(state.output, resolveEnvPath(env_path, *output));
@@ -1329,6 +1344,18 @@ LauncherSettings readSettings(const LauncherWindow& state) {
         settings.cameras.push_back({
             buildAxisRtspUrl(profile), profile.name, profile.transport, profile.video_acceleration});
     }
+    // Optional local video file (or a manually typed RTSP URL). With no camera
+    // profiles selected it flows through the legacy settings.source path so a
+    // typed RTSP URL still gets the configured resolution/fps parameters;
+    // alongside profiles it becomes one extra independently configured source.
+    // buildLaunchPlan validates both shapes (RTSP URL or existing video file).
+    const auto video = trim(editText(state.source));
+    if (!video.empty() && selected.empty()) {
+        settings.source = video;
+    } else if (!video.empty()) {
+        settings.cameras.push_back({
+            video, {}, state.preferences.rtsp_transport, state.preferences.video_acceleration});
+    }
     settings.runtime_options = state.runtime_options;
     settings.image_size = state.preferences.image_size;
     settings.ppe_class_confidences = state.preferences.ppe_class_confidences;
@@ -1431,6 +1458,10 @@ void setRunning(LauncherWindow& state, bool running) {
     EnableWindow(state.validate, !running);
     EnableWindow(state.start, !running);
     EnableWindow(state.stop, running);
+    EnableWindow(state.source, !running);
+    if (const HWND browse = GetDlgItem(state.window, SourceBrowse)) {
+        EnableWindow(browse, !running);
+    }
     EnableWindow(state.saved_camera, !running);
     EnableWindow(state.add_camera, !running);
     EnableWindow(state.edit_camera, !running);
@@ -1917,7 +1948,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     HWND window = CreateWindowExW(
         0, kWindowClass, kProductName,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 906, 543,
+        CW_USEDEFAULT, CW_USEDEFAULT, 906, 575,
         nullptr, nullptr, instance, &state);
     if (window == nullptr) {
         MessageBoxW(nullptr, L"Launcher window creation failed", kProductName, MB_OK | MB_ICONERROR);
