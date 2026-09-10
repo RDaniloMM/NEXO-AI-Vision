@@ -16,8 +16,18 @@
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace cuajone {
+
+struct RuntimeSource {
+    std::string source;
+    std::string label;
+    RtspTransport rtsp_transport{RtspTransport::Tcp};
+    VideoAcceleration video_acceleration{VideoAcceleration::Auto};
+    bool rtsp_transport_explicit{};
+    bool video_acceleration_explicit{};
+};
 
 struct RuntimeConfig {
     bool help{};
@@ -39,6 +49,7 @@ struct RuntimeConfig {
     AnalyticsMode analytics_mode{AnalyticsMode::PpeFall};
     std::string source;
     std::string source_label;
+    std::vector<RuntimeSource> sources;
     std::filesystem::path benchmark_image;
     std::filesystem::path ppe_engine;
     std::filesystem::path pose_engine;
@@ -50,9 +61,9 @@ struct RuntimeConfig {
     std::array<int, 2> pose_keypoint_shape{17, 3};
     std::optional<int> device;
     int image_size{kDefaultImageSize};
-    float ppe_confidence{0.30F};
+    float ppe_confidence{0.10F};
     std::array<float, kPpeOutputLabels.size()> ppe_class_confidences{
-        0.30F, 0.30F, 0.30F, 0.30F, 0.30F, 0.30F, 0.30F, 0.30F,
+        0.10F, 0.10F, 0.10F, 0.10F, 0.10F, 0.10F, 0.10F, 0.10F,
     };
     std::array<bool, kPpeItemCount> ppe_enabled{true, true, true, true, true, true, true};
     float pose_confidence{0.35F};

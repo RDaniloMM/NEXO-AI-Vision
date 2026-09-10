@@ -213,7 +213,7 @@ void validate(RuntimeConfig& config) {
     if (benchmark && !config.performance_report) {
         throw std::invalid_argument("--benchmark-image requires --performance-report");
     }
-    if (benchmark && !config.source.empty()) {
+    if (benchmark && (!config.source.empty() || !config.sources.empty())) {
         throw std::invalid_argument("--benchmark-image cannot be combined with --source");
     }
     if (benchmark && (config.show_window || config.preflight || config.target_fps_explicit
@@ -237,7 +237,7 @@ void validate(RuntimeConfig& config) {
     if (config.telemetry_interval_seconds > 0.0 && !config.performance_report) {
         throw std::invalid_argument("--telemetry-interval-sec requires --performance-report");
     }
-    if (!benchmark && (config.source.empty() || config.output.empty())) {
+    if (!benchmark && (config.sources.empty() || config.output.empty())) {
         throw std::invalid_argument(
             "--source and --output are required");
     }
@@ -260,8 +260,19 @@ void validate(RuntimeConfig& config) {
             "Auto mode requires a complete TensorRT engine pair, ONNX model pair, or both");
     }
     if (!benchmark) {
-        validateRtspSource(config.source);
-        if (config.source_label.empty()) config.source_label = defaultSourceLabel(config.source);
+        std::vector<std::string> labels;
+        for (auto& source : config.sources) {
+            validateRtspSource(source.source);
+            if (source.label.empty()) source.label = defaultSourceLabel(source.source);
+            if (std::ranges::find(labels, source.label) != labels.end()) {
+                throw std::invalid_argument("Every --source-label must be unique");
+            }
+            labels.push_back(source.label);
+            if (!source.rtsp_transport_explicit) source.rtsp_transport = config.rtsp_transport;
+            if (!source.video_acceleration_explicit) source.video_acceleration = config.video_acceleration;
+        }
+        config.source = config.sources.front().source;
+        config.source_label = config.sources.front().label;
     }
     const auto ratio = [](float value, std::string_view name) {
         if (!std::isfinite(value) || value < 0.0F || value > 1.0F) {
@@ -331,8 +342,24 @@ RuntimeConfig parseCommandLine(int argc, char** argv) {
         else if (option == "--allow-nonperson-pose-class") config.allow_nonperson_pose_class = true;
         else if (option == "--pose-person-gate") config.pose_requires_person = true;
         else if (option == "--mode") config.analytics_mode = parseAnalyticsMode(requireValue(index, argc, argv, option));
-        else if (option == "--source") config.source = requireValue(index, argc, argv, option);
-        else if (option == "--source-label") config.source_label = requireValue(index, argc, argv, option);
+        else if (option == "--source") {
+            config.sources.push_back({requireValue(index, argc, argv, option)});
+        }
+        else if (option == "--source-label") {
+            if (config.sources.empty()) throw std::invalid_argument("--source-label must follow --source");
+            if (!config.sources.back().label.empty()) throw std::invalid_argument("Duplicate --source-label for one source");
+            config.sources.back().label = requireValue(index, argc, argv, option);
+        }
+        else if (option == "--source-rtsp-transport") {
+            if (config.sources.empty()) throw std::invalid_argument("--source-rtsp-transport must follow --source");
+            config.sources.back().rtsp_transport = parseRtspTransport(requireValue(index, argc, argv, option));
+            config.sources.back().rtsp_transport_explicit = true;
+        }
+        else if (option == "--source-video-acceleration") {
+            if (config.sources.empty()) throw std::invalid_argument("--source-video-acceleration must follow --source");
+            config.sources.back().video_acceleration = parseVideoAcceleration(requireValue(index, argc, argv, option));
+            config.sources.back().video_acceleration_explicit = true;
+        }
         else if (option == "--benchmark-image") config.benchmark_image = requireValue(index, argc, argv, option);
         else if (option == "--benchmark-warmup") config.benchmark_warmup = parseNumber<std::size_t>(requireValue(index, argc, argv, option), option);
         else if (option == "--benchmark-iterations") config.benchmark_iterations = parseNumber<std::size_t>(requireValue(index, argc, argv, option), option);
@@ -423,7 +450,7 @@ void printHelp(std::ostream& output) {
     output <<
         "NexoAI Vision PPE and fall analytics\n\n"
         "Required:\n"
-        "  --source <rtsp-or-file>       RTSP URL, video, or image\n"
+        "  --source <rtsp-or-file>       Repeatable RTSP URL, video, or image\n"
         "  --output <directory>         Evidence and append-only CSV directory\n\n"
         "Compute and models:\n"
         "  --compute <mode>             auto, cuda, or cpu (default: installed setting/auto)\n"
@@ -444,7 +471,9 @@ void printHelp(std::ostream& output) {
         "  --preflight                  Validate everything without opening the source\n"
         "  --mode <mode>                ppe-only or ppe-fall (default: ppe-fall)\n"
         "  --device <index>             CUDA device index (default: first compatible)\n"
-        "  --source-label <label>       Non-secret source label used in events\n"
+        "  --source-label <label>       Unique label for the preceding --source\n"
+        "  --source-rtsp-transport <mode> Per-source default, tcp, or udp\n"
+        "  --source-video-acceleration <mode> Per-source auto, d3d11, or cpu\n"
         "  --ppe-labels <a,b,c>         Class labels for a raw engine without metadata\n"
         "  --pose-class-count <number>  Pose classes fallback (default: 1)\n"
         "  --pose-kpt-shape <count,dim> Pose schema fallback (default: 17,3)\n"
@@ -452,7 +481,7 @@ void printHelp(std::ostream& output) {
         "  --pose-person-gate           Run pose only when PPE detected a person\n\n"
         "Core thresholds:\n"
         "  --imgsz <size>               Inference size: 640, 768, 960, or 1280 (default: 640)\n"
-        "  --ppe-conf <0..1>            PPE confidence (default: 0.30)\n"
+        "  --ppe-conf <0..1>            PPE confidence (default: 0.10)\n"
         "  --ppe-class-conf <name=value> Repeatable exact PPE class threshold override\n"
         "  --ppe-enabled <name=0|1>    Repeatable operational PPE switch; Person is always enabled\n"
         "  --pose-conf <0..1>           Pose confidence (default: 0.35)\n"

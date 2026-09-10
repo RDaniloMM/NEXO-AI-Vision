@@ -175,8 +175,29 @@ TensorRtSession::TensorRtSession(
 
     nvinfer1::Dims input_dimensions = engine_->getTensorShape(input_name_.c_str());
     if (input_dimensions.nbDims != 4) throw std::runtime_error("YOLO input tensor must be rank 4 NCHW");
+    const bool dynamic_batch = input_dimensions.d[0] == -1;
+    dynamic_batch_ = dynamic_batch;
+    if (dynamic_batch) {
+        const auto minimum = engine_->getProfileShape(
+            input_name_.c_str(), 0, nvinfer1::OptProfileSelector::kMIN);
+        const auto maximum = engine_->getProfileShape(
+            input_name_.c_str(), 0, nvinfer1::OptProfileSelector::kMAX);
+        if (minimum.nbDims != 4 || maximum.nbDims != 4 || minimum.d[0] < 1
+            || maximum.d[0] < minimum.d[0]
+            || maximum.d[0] > static_cast<int>(resource_limits::kMaximumInferenceBatch)) {
+            throw std::runtime_error("TensorRT batch profile must be bounded in [1, 8]");
+        }
+        minimum_batch_size_ = static_cast<std::size_t>(minimum.d[0]);
+        maximum_batch_size_ = static_cast<std::size_t>(maximum.d[0]);
+    } else {
+        if (input_dimensions.d[0] < 1
+            || input_dimensions.d[0] > static_cast<int>(resource_limits::kMaximumInferenceBatch)) {
+            throw std::runtime_error("TensorRT fixed batch must be in [1, 8]");
+        }
+        minimum_batch_size_ = maximum_batch_size_ = static_cast<std::size_t>(input_dimensions.d[0]);
+    }
     const std::array<int, 4> selected_dimensions{
-        1,
+        static_cast<int>(minimum_batch_size_),
         3,
         preferred_image_size ? (*preferred_image_size)[0] : 0,
         preferred_image_size ? (*preferred_image_size)[1] : 0,
@@ -196,9 +217,9 @@ TensorRtSession::TensorRtSession(
                 "fixed size or install an engine with a compatible optimization profile");
         }
     }
-    if (input_dimensions.d[0] != 1 || input_dimensions.d[1] != 3
+    if (input_dimensions.d[1] != 3
         || input_dimensions.d[2] <= 0 || input_dimensions.d[3] <= 0) {
-        throw std::runtime_error("Only fixed batch-1, three-channel NCHW YOLO inputs are supported");
+        throw std::runtime_error("Only bounded-batch, three-channel NCHW YOLO inputs are supported");
     }
     if (input_dimensions.d[2] > resource_limits::kMaximumImageDimension
         || input_dimensions.d[3] > resource_limits::kMaximumImageDimension) {
@@ -215,26 +236,32 @@ TensorRtSession::TensorRtSession(
     }
     input_height_ = static_cast<int>(input_dimensions.d[2]);
     input_width_ = static_cast<int>(input_dimensions.d[3]);
-    input_elements_ = volume(
-        input_dimensions, resource_limits::kMaximumInputElements, "TensorRT input");
+    input_elements_per_sample_ = static_cast<std::size_t>(input_dimensions.d[1])
+        * static_cast<std::size_t>(input_dimensions.d[2])
+        * static_cast<std::size_t>(input_dimensions.d[3]);
 
+    nvinfer1::Dims maximum_input_dimensions = input_dimensions;
+    maximum_input_dimensions.d[0] = static_cast<int>(maximum_batch_size_);
+    if (!context_->setInputShape(input_name_.c_str(), maximum_input_dimensions)) {
+        throw std::runtime_error("TensorRT rejected the maximum batch shape");
+    }
     const nvinfer1::Dims output_dimensions = context_->getTensorShape(output_name_.c_str());
-    output_elements_ = volume(
-        output_dimensions, resource_limits::kMaximumOutputElements, "TensorRT output");
+    maximum_output_elements_ = volume(output_dimensions, resource_limits::kMaximumOutputElements, "TensorRT output");
+    output_elements_ = maximum_output_elements_;
     output_shape_.reserve(static_cast<std::size_t>(output_dimensions.nbDims));
     for (int index = 0; index < output_dimensions.nbDims; ++index) {
         output_shape_.push_back(output_dimensions.d[index]);
     }
 
     input_buffer_ = DeviceBuffer(resource_limits::checkedTensorBytes(
-        input_elements_, elementSize(input_type_), "TensorRT input"));
+        input_elements_per_sample_ * maximum_batch_size_, elementSize(input_type_), "TensorRT input"));
     output_buffer_ = DeviceBuffer(resource_limits::checkedTensorBytes(
-        output_elements_, elementSize(output_type_), "TensorRT output"));
+        maximum_output_elements_, elementSize(output_type_), "TensorRT output"));
     host_input_ = PinnedHostBuffer(resource_limits::checkedTensorBytes(
-        input_elements_, elementSize(input_type_), "TensorRT pinned input"));
+        input_elements_per_sample_ * maximum_batch_size_, elementSize(input_type_), "TensorRT pinned input"));
     host_output_ = PinnedHostBuffer(resource_limits::checkedTensorBytes(
-        output_elements_, elementSize(output_type_), "TensorRT pinned output"));
-    if (output_type_ == nvinfer1::DataType::kHALF) float_output_.resize(output_elements_);
+        maximum_output_elements_, elementSize(output_type_), "TensorRT pinned output"));
+    if (output_type_ == nvinfer1::DataType::kHALF) float_output_.resize(maximum_output_elements_);
     if (!context_->setTensorAddress(input_name_.c_str(), input_buffer_.data())
         || !context_->setTensorAddress(output_name_.c_str(), output_buffer_.data())) {
         throw std::runtime_error("TensorRT setTensorAddress failed");
@@ -251,11 +278,26 @@ TensorRtSession::~TensorRtSession() {
 int TensorRtSession::inputWidth() const noexcept { return input_width_; }
 int TensorRtSession::inputHeight() const noexcept { return input_height_; }
 const std::vector<std::int64_t>& TensorRtSession::outputShape() const noexcept { return output_shape_; }
+std::size_t TensorRtSession::maximumBatchSize() const noexcept { return maximum_batch_size_; }
 
-void TensorRtSession::submit(std::span<const float> nchw_input) {
-    if (nchw_input.size() != input_elements_) {
+void TensorRtSession::submit(std::span<const float> nchw_input, std::size_t batch_size) {
+    if (batch_size < minimum_batch_size_ || batch_size > maximum_batch_size_
+        || (!dynamic_batch_ && batch_size != maximum_batch_size_)) {
+        throw std::invalid_argument("Requested batch size is outside the TensorRT optimization profile");
+    }
+    const std::size_t input_elements = input_elements_per_sample_ * batch_size;
+    if (nchw_input.size() != input_elements) {
         throw std::invalid_argument("Preprocessed input length does not match TensorRT input tensor");
     }
+    nvinfer1::Dims input_dimensions = context_->getTensorShape(input_name_.c_str());
+    input_dimensions.d[0] = static_cast<int>(batch_size);
+    if (!context_->setInputShape(input_name_.c_str(), input_dimensions)) {
+        throw std::runtime_error("TensorRT rejected the requested batch shape");
+    }
+    const nvinfer1::Dims output_dimensions = context_->getTensorShape(output_name_.c_str());
+    output_elements_ = volume(output_dimensions, resource_limits::kMaximumOutputElements, "TensorRT output");
+    output_shape_.clear();
+    for (int index = 0; index < output_dimensions.nbDims; ++index) output_shape_.push_back(output_dimensions.d[index]);
     if (input_type_ == nvinfer1::DataType::kFLOAT) {
         std::copy(nchw_input.begin(), nchw_input.end(),
             static_cast<float*>(host_input_.data()));
@@ -269,13 +311,13 @@ void TensorRtSession::submit(std::span<const float> nchw_input) {
     }
 
     checkCuda(cudaMemcpyAsync(
-        input_buffer_.data(), host_input_.data(), input_buffer_.size(),
+        input_buffer_.data(), host_input_.data(), input_elements * elementSize(input_type_),
         cudaMemcpyHostToDevice, stream_.get()), "cudaMemcpyAsync input");
     if (!context_->enqueueV3(stream_.get())) {
         throw std::runtime_error("TensorRT enqueueV3 failed");
     }
     checkCuda(cudaMemcpyAsync(
-        host_output_.data(), output_buffer_.data(), output_buffer_.size(),
+        host_output_.data(), output_buffer_.data(), output_elements_ * elementSize(output_type_),
         cudaMemcpyDeviceToHost, stream_.get()), "cudaMemcpyAsync output");
     checkCuda(cudaEventRecord(event_, stream_.get()), "cudaEventRecord");
 }
@@ -302,7 +344,12 @@ InferenceOutput TensorRtSession::collect() {
 }
 
 InferenceOutput TensorRtSession::infer(std::span<const float> nchw_input) {
-    submit(nchw_input);
+    submit(nchw_input, 1);
+    return collect();
+}
+
+InferenceOutput TensorRtSession::inferBatch(std::span<const float> nchw_input, std::size_t batch_size) {
+    submit(nchw_input, batch_size);
     return collect();
 }
 

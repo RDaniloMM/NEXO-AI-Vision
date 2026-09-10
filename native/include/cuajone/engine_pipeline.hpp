@@ -15,7 +15,9 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace cuajone {
 
@@ -37,9 +39,9 @@ struct EnginePipelineConfig {
     bool pose_requires_person{};
     std::optional<int> device;
     int image_size{kDefaultImageSize};
-    float ppe_confidence{0.30F};
+    float ppe_confidence{0.10F};
     std::array<float, kPpeOutputLabels.size()> ppe_class_confidences{
-        0.30F, 0.30F, 0.30F, 0.30F, 0.30F, 0.30F, 0.30F, 0.30F,
+        0.10F, 0.10F, 0.10F, 0.10F, 0.10F, 0.10F, 0.10F, 0.10F,
     };
     std::array<bool, kPpeItemCount> ppe_enabled{true, true, true, true, true, true, true};
     float pose_confidence{0.35F};
@@ -70,6 +72,15 @@ struct EnginePipelineSummary {
     bool pose_metadata_prefix{};
     bool pose_requires_person{};
     int image_size{kDefaultImageSize};
+    std::size_t maximum_batch_size{1};
+};
+
+struct EngineFrameInput {
+    cv::Mat frame;
+    std::string source_id;
+    std::uint64_t frame_id{};
+    std::int64_t monotonic_timestamp_ms{};
+    std::string observed_at;
 };
 
 class NativeEnginePipeline {
@@ -85,6 +96,7 @@ public:
         std::uint64_t frame_id,
         std::int64_t monotonic_timestamp_ms,
         std::string observed_at);
+    std::vector<ProcessedFrame> processBatch(std::span<const EngineFrameInput> frames);
     void reset() noexcept;
     [[nodiscard]] const EnginePipelineSummary& summary() const noexcept;
 

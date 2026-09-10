@@ -21,8 +21,8 @@ struct Shape2D {
 
 Shape2D predictionShape(std::span<const std::int64_t> shape) {
     if (shape.size() == 3) {
-        if (shape[0] != 1) {
-            throw std::runtime_error("YOLO output must have a fixed batch size of 1");
+        if (shape[0] <= 0) {
+            throw std::runtime_error("YOLO output batch dimension must be positive");
         }
         shape = shape.subspan(1);
     }
@@ -90,7 +90,7 @@ std::optional<YoloSchema> validateApprovedEndToEndPoseSchema(
     std::size_t class_count,
     std::size_t keypoint_count,
     std::size_t keypoint_dimensions) {
-    if (shape.size() != 3 || shape[0] != 1 || shape[1] != 300) return std::nullopt;
+    if (shape.size() != 3 || shape[0] <= 0 || shape[1] != 300) return std::nullopt;
     const std::size_t expected_channels = 6 + keypoint_count * keypoint_dimensions;
     if (shape[2] != static_cast<std::int64_t>(expected_channels)) return std::nullopt;
     if (class_count == 0 || keypoint_count == 0 || keypoint_dimensions < 3) {
@@ -111,7 +111,7 @@ std::optional<YoloSchema> validateApprovedEndToEndPoseSchema(
 std::optional<YoloSchema> validateApprovedEndToEndDetectSchema(
     std::span<const std::int64_t> shape,
     std::size_t class_count) {
-    if (shape.size() != 3 || shape[0] != 1 || shape[1] != 300) return std::nullopt;
+    if (shape.size() != 3 || shape[0] <= 0 || shape[1] != 300) return std::nullopt;
     if (shape[2] != 6) return std::nullopt;
     if (class_count == 0) {
         throw std::invalid_argument("End-to-end detect decoding requires at least one class");

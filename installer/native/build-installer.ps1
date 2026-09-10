@@ -1,12 +1,40 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
+# Versioning: the app-level third component is the -Build parameter (default 0).
+# The per-MSI auto-increment lives in the Revision, the 4th component of
+# -FileVersion ("$Major.$Minor.$Build.$Revision"), which maps to the 3rd
+# component of the MSI ProductVersion ("$Major.$Minor.$Revision") via
+# Assert-LauncherBuildVersion in version-policy.ps1. When neither -Version nor
+# -FileVersion is passed explicitly, the script bumps installer/native/
+# version-state.json ({major,minor,lastRevision}) and derives
+# FileVersion="$Major.$Minor.$Build.$Revision" plus
+# Version="$Major.$Minor.$Build-internal.$Revision", keeping MsiVersion strictly
+# increasing for MajorUpgrade. Explicit -Version/-FileVersion always win and
+# skip the auto-bump. The resolved FileVersion must already be stamped in the
+# launcher PE (cmake -DCUAJONE_FILE_VERSION=<FileVersion>); use
+# -AutoRebuildLauncher to reconfigure/rebuild it automatically, otherwise the
+# script fails fast with the exact rebuild command. UpgradeCode never changes.
+
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-    [string]$Version = "0.1.0-internal.25",
+    [string]$Version = "0.1.0-internal.36",
 
     [ValidatePattern('^\d+\.\d+\.\d+\.\d+$')]
-    [string]$FileVersion = "0.1.0.25",
+    [string]$FileVersion = "0.1.0.36",
+
+    [ValidateRange(0, 255)]
+    [int]$Major = 0,
+
+    [ValidateRange(0, 255)]
+    [int]$Minor = 1,
+
+    [ValidateRange(0, 65535)]
+    [int]$Build = 0,
+
+    [string]$VersionStatePath,
+
+    [switch]$AutoRebuildLauncher,
 
     [ValidateSet("Preview", "Release")]
     [string]$BuildMode = "Release",
@@ -157,6 +185,32 @@ function Resolve-EngineBuilderOnnx([string]$ConfiguredPath, [string]$Description
     throw "$Description must be under the repository or native tool root: $full"
 }
 
+function Invoke-PythonScript(
+    [string]$PythonPath,
+    [string]$Code,
+    [string[]]$ScriptArgs = @()
+) {
+    # Windows PowerShell 5.1 strips embedded double quotes when forwarding `-c`
+    # code to a native executable, which breaks multi-line Python snippets.
+    # Running the code from a temp file behaves identically on PS 5.1 and PS 7+.
+    $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("cuajone-py-" + [Guid]::NewGuid().ToString("N") + ".py")
+    Set-Content -LiteralPath $tempScript -Value $Code -Encoding UTF8
+    try {
+        return @(& $PythonPath $tempScript @ScriptArgs 2>&1)
+    } finally {
+        Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Write-Utf8NoBom([string]$Path, [string]$Content) {
+    # Version-agnostic UTF-8 without BOM: Windows PowerShell 5.1
+    # Set-Content -Encoding utf8 writes a BOM (EF BB BF), which the strict
+    # native ONNX manifest parser rejects at byte 0. [IO.File]::WriteAllText
+    # with UTF8Encoding($false) behaves identically on PS 5.1 and PS 7+.
+    $noBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $noBom)
+}
+
 function Export-OnnxModel(
     [string]$PythonPath,
     [string]$SourceModel,
@@ -184,7 +238,7 @@ if task == "detect":
 else:
     model.export(format="onnx", imgsz=640, dynamic=True, nms=False)
 '@
-    $output = @(& $PythonPath -c $python $SourceModel $Task 2>&1)
+    $output = @(Invoke-PythonScript $PythonPath $python @($SourceModel, $Task) 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw "ONNX export failed for $SourceModel`n$($output -join [Environment]::NewLine)"
     }
@@ -320,11 +374,13 @@ if role == "ppe":
     ]
 print(json.dumps(manifest, separators=(",", ":")))
 '@
-    $output = @(& $PythonPath -c $python $OnnxPath $Role $SourceModel 2>&1)
+    $output = @(Invoke-PythonScript $PythonPath $python @($OnnxPath, $Role, $SourceModel) 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw "ONNX manifest generation failed for $OnnxPath`n$($output -join [Environment]::NewLine)"
     }
-    ($output -join [Environment]::NewLine) | Set-Content -LiteralPath $manifestPath -Encoding utf8 -NoNewline
+    # Manifests must be BOM-free: the native parser strips a legacy BOM for
+    # robustness, but new artifacts are always written as plain UTF-8.
+    Write-Utf8NoBom $manifestPath ($output -join [Environment]::NewLine)
     Assert-File $manifestPath "ONNX model manifest"
     [pscustomobject]@{
         path = $manifestPath
@@ -424,7 +480,11 @@ function Get-OrExportOnnxModel(
     $sourceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $SourceModel).Hash.ToLowerInvariant()
     $exporterVersion = Get-UltralyticsVersion $PythonPath
     $exportMode = if ($Task -ceq "detect") { "end2end-detect-dynamic-v3" } else { "raw-pose-dynamic-v3" }
-    $recipe = "recipe_version=5;role=$Role;task=$Task;export_mode=$exportMode;allowed_imgsz=640,768,960,1280;source_sha256=$sourceSha256;ultralytics=$exporterVersion"
+    # recipe_version 6 invalidates caches written with BOM manifests/receipts
+    # (recipe_version 5 used Set-Content -Encoding utf8, which emits a BOM on
+    # Windows PowerShell 5.1). The native parser now tolerates a legacy BOM,
+    # but bumping forces a clean BOM-free re-export.
+    $recipe = "recipe_version=6;role=$Role;task=$Task;export_mode=$exportMode;allowed_imgsz=640,768,960,1280;source_sha256=$sourceSha256;ultralytics=$exporterVersion"
     $cacheDirectory = Join-Path $CacheRoot (Get-StringSha256 $recipe)
     $onnxPath = Join-Path $cacheDirectory "$Role.onnx"
     $manifestPath = "$onnxPath.manifest.json"
@@ -458,7 +518,7 @@ function Get-OrExportOnnxModel(
             manifest_sha256 = $manifest.sha256
         }
         $temporaryReceipt = "$receiptPath.tmp"
-        $receipt | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporaryReceipt -Encoding utf8 -NoNewline
+        Write-Utf8NoBom $temporaryReceipt ($receipt | ConvertTo-Json -Compress)
         Move-Item -LiteralPath $temporaryReceipt -Destination $receiptPath -Force
     } else {
         $exported = [pscustomobject]@{
@@ -568,14 +628,25 @@ function Find-Dependency([string]$Name, [string[]]$SearchDirectories) {
 }
 
 function Get-StableHex([string]$Value) {
+    # Compatible with Windows PowerShell 5.1 (.NET Framework): HashData and
+    # ToHexString only exist on .NET 5+.
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value.ToLowerInvariant())
-    $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
-    [System.Convert]::ToHexString($hash).ToLowerInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha256.ComputeHash($bytes)
+    } finally {
+        $sha256.Dispose()
+    }
+    ([System.BitConverter]::ToString($hash)).Replace("-", "").ToLowerInvariant()
 }
 
 function Get-DeterministicComponentGuid([string]$RelativePath) {
     $hex = Get-StableHex "$upgradeCode|$RelativePath"
-    $bytes = [System.Convert]::FromHexString($hex.Substring(0, 32))
+    $hexPart = $hex.Substring(0, 32)
+    $bytes = New-Object byte[] 16
+    for ($i = 0; $i -lt 16; $i++) {
+        $bytes[$i] = [System.Convert]::ToByte($hexPart.Substring($i * 2, 2), 16)
+    }
     $bytes[7] = ($bytes[7] -band 0x0F) -bor 0x50
     $bytes[8] = ($bytes[8] -band 0x3F) -bor 0x80
     [System.Guid]::new($bytes).ToString().ToUpperInvariant()
@@ -603,7 +674,7 @@ function Write-PayloadSource {
     $lines.Add("    <ComponentGroup Id=`"$ComponentGroupName`" Directory=`"INSTALLFOLDER`">")
 
     foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File | Sort-Object FullName) {
-        $relative = [System.IO.Path]::GetRelativePath($Root, $file.FullName).Replace('/', '\')
+        $relative = (Get-RelativePathCompat $Root $file.FullName).Replace('/', '\')
         if ($IncludePrefix -and -not $relative.StartsWith($IncludePrefix, [StringComparison]::OrdinalIgnoreCase)) {
             continue
         }
@@ -672,6 +743,32 @@ Assert-Directory $WixToolRoot "WiX tool root"
 Assert-File $ReleaseExecutable "Release executable"
 Assert-File $LauncherExecutable "Launcher executable"
 . (Join-Path $scriptRoot "version-policy.ps1")
+if ([string]::IsNullOrWhiteSpace($VersionStatePath)) { $VersionStatePath = Join-Path $scriptRoot "version-state.json" }
+if (-not $PSBoundParameters.ContainsKey('Version') -and -not $PSBoundParameters.ContainsKey('FileVersion')) {
+    $resolvedVersion = Resolve-NextFileVersion -Major $Major -Minor $Minor -Build $Build -StatePath $VersionStatePath
+    $Version = $resolvedVersion.Version
+    $FileVersion = $resolvedVersion.FileVersion
+    Write-Verbose ("Auto-bumped installer version to {0} ({1})" -f $Version, $FileVersion)
+}
+if ($AutoRebuildLauncher) {
+    $launcherBuildDir = Split-Path -Parent $LauncherExecutable
+    & cmake -S (Join-Path $projectRoot "native") -B $launcherBuildDir "-DCUAJONE_FILE_VERSION=$FileVersion" "-DCUAJONE_PRODUCT_VERSION=$Version"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Launcher reconfigure failed for -DCUAJONE_FILE_VERSION=$FileVersion"
+    }
+    & cmake --build $launcherBuildDir --target cuajone_launcher --config Release
+    if ($LASTEXITCODE -ne 0) {
+        throw "Launcher rebuild failed for -DCUAJONE_FILE_VERSION=$FileVersion"
+    }
+} else {
+    $stamped = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($LauncherExecutable)
+    $stampedVersion = '{0}.{1}.{2}.{3}' -f $stamped.FileMajorPart, $stamped.FileMinorPart, $stamped.FileBuildPart, $stamped.FilePrivatePart
+    if ($stampedVersion -cne $FileVersion) {
+        throw ("Launcher PE version '{0}' does not match resolved -FileVersion {1}. " -f $stampedVersion, $FileVersion) +
+            ("Reconfigure native with -DCUAJONE_FILE_VERSION={0} -DCUAJONE_PRODUCT_VERSION={1} and rebuild " -f $FileVersion, $Version) +
+            "before packaging, or re-run this script with -AutoRebuildLauncher."
+    }
+}
 $msiVersion = Assert-LauncherBuildVersion -LauncherExecutable $LauncherExecutable -FileVersion $FileVersion
 Assert-File $HardwareProbeCustomAction "Hardware probe custom action"
 if ((Split-Path -Leaf $ReleaseExecutable) -cne "NexoAIVision.exe") {
@@ -833,7 +930,7 @@ $nativeRoot = Join-Path $projectRoot "native"
 $cmakeLists = Join-Path $nativeRoot "CMakeLists.txt"
 $allCpp = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot "src") -Recurse -File -Filter "*.cpp").FullName
 $allHeaders = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot "include") -Recurse -File -Include "*.hpp", "*.h").FullName
-$launcherNames = @("launcher.cpp", "launcher_support.cpp", "launcher_support.hpp", "launcher_version.cpp", "launcher_version.hpp")
+$launcherNames = @("launcher.cpp", "launcher_support.cpp", "launcher_support.hpp", "launcher_resources.h", "launcher_version.cpp", "launcher_version.hpp")
 $probeNames = @("compute.cpp", "installer_custom_action.cpp", "compute.hpp")
 $freshnessByBinary = @{
     $ReleaseExecutable = @($cmakeLists) + @(
@@ -842,7 +939,7 @@ $freshnessByBinary = @{
         }
     ) + @(
         $allHeaders | Where-Object {
-            (Split-Path -Leaf $_) -ne "launcher_support.hpp"
+            (Split-Path -Leaf $_) -notin @("launcher_support.hpp", "launcher_version.hpp", "launcher_resources.h")
         }
     )
     $LauncherExecutable = @($cmakeLists,
@@ -999,7 +1096,7 @@ function Copy-StagedInput(
         throw "Staging destination is outside the stage: $resolvedDestination"
     }
     $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedSource).Hash.ToLowerInvariant()
-    $stagedRelativePath = [System.IO.Path]::GetRelativePath($resolvedStage, $resolvedDestination).Replace('\', '/')
+    $stagedRelativePath = (Get-RelativePathCompat $resolvedStage $resolvedDestination).Replace('\', '/')
     $skipCopy = $false
     if ($null -ne $stageReceiptLookup) {
         $priorEntry = $stageReceiptLookup[$stagedRelativePath]
@@ -1029,7 +1126,7 @@ function Copy-StagedInput(
     $stagedSources.Add([ordered]@{
         sourceScope = $SourceScope
         sourcePath = $resolvedSource
-        sourceRelativePath = [System.IO.Path]::GetRelativePath($scopeRoot, $resolvedSource).Replace('\', '/')
+        sourceRelativePath = (Get-RelativePathCompat $scopeRoot $resolvedSource).Replace('\', '/')
         stagedRelativePath = $stagedRelativePath
         sourceSha256 = $sourceHash
         stagedSha256 = $stagedHash
@@ -1047,7 +1144,7 @@ function Copy-StagedTree(
 ) {
     Assert-Directory $SourceRoot "Staging source directory"
     foreach ($file in Get-ChildItem -LiteralPath $SourceRoot -Recurse -File | Sort-Object FullName) {
-        $relative = [System.IO.Path]::GetRelativePath($SourceRoot, $file.FullName)
+        $relative = Get-RelativePathCompat $SourceRoot $file.FullName
         Copy-StagedInput $file.FullName (Join-Path $DestinationRoot $relative) $SourceScope $Reason
     }
 }
@@ -1415,7 +1512,7 @@ if ($FastPreview) {
         $null = $currentStagedPaths.Add([string]$stagedEntry.stagedRelativePath)
     }
     foreach ($stagedFile in Get-ChildItem -LiteralPath $StageDir -Recurse -File) {
-        $relativePath = [System.IO.Path]::GetRelativePath($StageDir, $stagedFile.FullName).Replace('\', '/')
+        $relativePath = (Get-RelativePathCompat $StageDir $stagedFile.FullName).Replace('\', '/')
         if (-not $currentStagedPaths.Contains($relativePath) -and $relativePath -notin $generatedStageRelativePaths) {
             Remove-Item -LiteralPath $stagedFile.FullName -Force
         }
@@ -1658,6 +1755,8 @@ $metadata = [ordered]@{
                 manifestSha256 = $poseManifest.sha256
             }
         }
+    } else {
+        $null
     }
     projectLicenseSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $projectRoot "LICENSE")).Hash.ToLowerInvariant()
     signingPolicy = if ($isInternalPilotSigning) {
@@ -1714,7 +1813,7 @@ $manifestLines = foreach ($file in Get-ChildItem -LiteralPath $StageDir -Recurse
     if ($file.FullName -eq $manifestPath) {
         continue
     }
-    $relative = [System.IO.Path]::GetRelativePath($StageDir, $file.FullName).Replace('\', '/')
+    $relative = (Get-RelativePathCompat $StageDir $file.FullName).Replace('\', '/')
     "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant(), $relative
 }
 $manifestLines | Set-Content -LiteralPath $manifestPath -Encoding ASCII

@@ -16,7 +16,7 @@ def parse_args(*args: str) -> Any:
     return export_tensorrt.create_parser().parse_args(args)
 
 
-def test_default_export_plan_is_fixed_batch_one_fp16() -> None:
+def test_default_export_plan_is_dynamic_batch_four_fp16() -> None:
     plan = export_tensorrt.build_export_plan(parse_args("ppe.pt", "--task", "detect"))
 
     assert plan == {
@@ -27,8 +27,8 @@ def test_default_export_plan_is_fixed_batch_one_fp16() -> None:
             "format": "engine",
             "device": "cuda:0",
             "imgsz": 640,
-            "batch": 1,
-            "dynamic": False,
+            "batch": 4,
+            "dynamic": True,
             "quantize": 16,
         },
         "artifact": "ppe.engine",
@@ -65,8 +65,8 @@ def test_dry_run_prints_deterministic_plan_without_execution(
     output = capsys.readouterr().out.strip()
     assert json.loads(output)["export"]["quantize"] == 16
     assert output == (
-        '{"artifact":"ppe.engine","export":{"batch":1,"device":"cuda:0",'
-        '"dynamic":false,"format":"engine","imgsz":640,"quantize":16},'
+        '{"artifact":"ppe.engine","export":{"batch":4,"device":"cuda:0",'
+        '"dynamic":true,"format":"engine","imgsz":640,"quantize":16},'
         '"manifest":"ppe.engine.manifest.json","model":"ppe.pt",'
         '"plan_version":2,"task":"detect"}'
     )

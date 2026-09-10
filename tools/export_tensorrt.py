@@ -69,11 +69,14 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task", choices=("detect", "pose"), required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--imgsz", nargs="+", type=int, default=[640])
-    parser.add_argument("--batch", type=int, default=1)
+    parser.add_argument(
+        "--batch", type=int, default=4,
+        help="Batch máximo/óptimo del perfil multicámara (predeterminado: 4).",
+    )
     shape = parser.add_mutually_exclusive_group()
     shape.add_argument("--dynamic", action="store_true", help="Habilita formas dinámicas.")
     shape.add_argument("--fixed", action="store_false", dest="dynamic", help="Usa formas fijas (predeterminado).")
-    parser.set_defaults(dynamic=False)
+    parser.set_defaults(dynamic=True)
     parser.add_argument("--quantize", type=int, choices=(8, 16, 32), default=16)
     parser.add_argument("--data", help="Dataset YAML obligatorio para calibración INT8.")
     parser.add_argument(

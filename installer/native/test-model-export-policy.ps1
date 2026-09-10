@@ -33,18 +33,18 @@ $requiredPatterns = [ordered]@{
 }
 
 foreach ($entry in $requiredPatterns.GetEnumerator()) {
-    if (-not $source.Contains($entry.Value, [System.StringComparison]::Ordinal)) {
+    if ($source.IndexOf($entry.Value, [System.StringComparison]::Ordinal) -lt 0) {
         throw "Installer ONNX export policy is missing $($entry.Key): $($entry.Value)"
     }
 }
 
-if ($source.Contains("SkipModelBundle", [System.StringComparison]::Ordinal)) {
+if ($source.IndexOf("SkipModelBundle", [System.StringComparison]::Ordinal) -ge 0) {
     throw "Installer still exposes an unsupported model-bundle opt-out"
 }
-if (-not $packageSource.Contains(
+if ($packageSource.IndexOf(
         '<ComponentGroupRef Id="ModelComponents" />',
-        [System.StringComparison]::Ordinal) -or
-    $packageSource.Contains('Feature Id="ModelsFeature"', [System.StringComparison]::Ordinal)) {
+        [System.StringComparison]::Ordinal) -lt 0 -or
+    $packageSource.IndexOf('Feature Id="ModelsFeature"', [System.StringComparison]::Ordinal) -ge 0) {
     throw "Models must be mandatory members of MainFeature"
 }
 

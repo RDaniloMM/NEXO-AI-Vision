@@ -223,13 +223,49 @@ $env:CUAJONE_SIGN_COMMAND = (Resolve-Path .\installer\native\sign-release.ps1).P
 
 .\installer\native\build-installer.ps1 `
   -BuildMode Preview `
-  -Version "0.1.0-internal.25" `
-  -FileVersion "0.1.0.25" `
+  -Version "0.1.0-internal.36" `
+  -FileVersion "0.1.0.36" `
   -PpeModelPath ".\best_ppe.pt" `
   -RefreshModelExport
 ```
 
-El candidato local usa `0.1.0-internal.25`, no está publicado ni autorizado para
+### Auto-incremento de versión (un MSI = un Revision)
+
+Cada build sin `-Version`/`-FileVersion` explícitos consume el contador
+`installer/native/version-state.json` (`{major, minor, lastRevision}`) y deriva:
+
+- `FileVersion = "$Major.$Minor.$Build.$Revision"` (4 componentes, PE del launcher)
+- `Version = "$Major.$Minor.$Build-internal.$Revision"` (etiqueta del producto)
+- `MsiVersion = "$Major.$Minor.$Revision"` (ProductVersion del MSI vía
+  `Assert-LauncherBuildVersion`: 4to componente de FileVersion = 3er del MSI)
+
+El 3er nivel de app es el parámetro `-Build` (fijo salvo cambio de línea base);
+lo que se auto-incrementa es `Revision`. `Major`/`Minor` nuevos resetean el
+contador a 0. Pasar `-Version` o `-FileVersion` desactiva el bump. El
+`UpgradeCode` de `Package.wxs` nunca cambia, y como `MsiVersion` crece
+estrictamente, `MajorUpgrade` reemplaza la versión anterior.
+
+```powershell
+# Bump automático (37, 38, ...): resuelve versión y exige el launcher ya
+# reconstruido con ese FileVersion, o falla con el comando exacto.
+.\installer\native\build-installer.ps1 -BuildMode Preview -AllowUnsignedPreview
+
+# Misma resolución pero reconstruyendo el launcher automáticamente:
+.\installer\native\build-installer.ps1 -BuildMode Preview -AllowUnsignedPreview -AutoRebuildLauncher
+
+# Línea base distinta (resetea Revision a 0) o pin explícito (sin bump):
+.\installer\native\build-installer.ps1 -BuildMode Preview -AllowUnsignedPreview -Major 0 -Minor 2
+.\installer\native\build-installer.ps1 -BuildMode Preview -Version "0.1.0-internal.36" -FileVersion "0.1.0.36"
+```
+
+Antes de empaquetar, el script verifica que el PE de
+`NexoAIVisionLauncher.exe` ya trae el `FileVersion` resuelto (mismo gate que
+`version-policy.ps1`, que pide `-DCUAJONE_FILE_VERSION=<nuevo>` + rebuild).
+Con `-AutoRebuildLauncher` ejecuta ese `cmake -S native -B <buildDir>
+-DCUAJONE_FILE_VERSION=... -DCUAJONE_PRODUCT_VERSION=...` y
+`cmake --build <buildDir> --target cuajone_launcher` por vos.
+
+El candidato local usa `0.1.0-internal.36`, no está publicado ni autorizado para
 instalación; `v0.1.0-internal.24` y sus assets publicados son inmutables. Un build `Release` exige además
 `CUAJONE_PARITY_RECEIPT` con contrato `1.0.0`, commit exacto y paridad completa
 sobre engines/video autorizados. El recibo debe cumplir el esquema compartido,
@@ -278,13 +314,13 @@ marcado como fast, y `-FastPreview` exige exactamente ese marcado.
 
 ```powershell
 # 1) Layout portable (segundos): sin MSI
-.\installer\native\build-installer.ps1 -BuildMode Preview -AllowUnsignedPreview -StageOnly -Version 0.1.0-internal.25 -FileVersion 0.1.0.25
+.\installer\native\build-installer.ps1 -BuildMode Preview -AllowUnsignedPreview -StageOnly -Version 0.1.0-internal.36 -FileVersion 0.1.0.36
 
 # 2) Preview rápido (el primer run comprime una vez; el siguiente es incremental)
-.\installer\native\build-installer.ps1 -BuildMode Preview -AllowUnsignedPreview -FastPreview -Version 0.1.0-internal.25 -FileVersion 0.1.0.25
+.\installer\native\build-installer.ps1 -BuildMode Preview -AllowUnsignedPreview -FastPreview -Version 0.1.0-internal.36 -FileVersion 0.1.0.36
 
 # 3) Preview completo (aceptación)
-.\installer\native\build-installer.ps1 -BuildMode Preview -AllowUnsignedPreview -Version 0.1.0-internal.25 -FileVersion 0.1.0.25
+.\installer\native\build-installer.ps1 -BuildMode Preview -AllowUnsignedPreview -Version 0.1.0-internal.36 -FileVersion 0.1.0.36
 ```
 
 El layout portable de `-StageOnly` queda listo para inspección o para el harness de

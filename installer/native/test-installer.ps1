@@ -324,7 +324,7 @@ foreach ($generatedPath in $stageMetadata.generatedStagePaths) {
     Assert-File (Join-Path $stage $generatedPath) "Declared generated stage file"
 }
 foreach ($stagedFile in Get-ChildItem -LiteralPath $stage -Recurse -File) {
-    $relative = [System.IO.Path]::GetRelativePath($stage, $stagedFile.FullName).Replace('\', '/')
+    $relative = (Get-RelativePathCompat $stage $stagedFile.FullName).Replace('\', '/')
     if (-not $classifiedStagePaths.Contains($relative)) {
         throw "Staged file has no copied-source or generated provenance: $relative"
     }
@@ -733,7 +733,7 @@ try {
 
         $payloadCount = 0
         foreach ($stagedFile in Get-ChildItem -LiteralPath $stage -Recurse -File) {
-            $relative = [System.IO.Path]::GetRelativePath($stage, $stagedFile.FullName)
+            $relative = Get-RelativePathCompat $stage $stagedFile.FullName
             $extractedFile = Join-Path $extractApp $relative
             Assert-File $extractedFile "Extracted payload file"
             $stageHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stagedFile.FullName).Hash

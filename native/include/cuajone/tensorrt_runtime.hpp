@@ -86,9 +86,11 @@ public:
     [[nodiscard]] int inputWidth() const noexcept override;
     [[nodiscard]] int inputHeight() const noexcept override;
     [[nodiscard]] const std::vector<std::int64_t>& outputShape() const noexcept override;
+    [[nodiscard]] std::size_t maximumBatchSize() const noexcept override;
     InferenceOutput infer(std::span<const float> nchw_input) override;
+    InferenceOutput inferBatch(std::span<const float> nchw_input, std::size_t batch_size) override;
 
-    void submit(std::span<const float> nchw_input);
+    void submit(std::span<const float> nchw_input, std::size_t batch_size = 1);
     InferenceOutput collect();
 
 private:
@@ -109,8 +111,12 @@ private:
     nvinfer1::DataType output_type_{};
     int input_width_{};
     int input_height_{};
-    std::size_t input_elements_{};
+    std::size_t minimum_batch_size_{1};
+    std::size_t maximum_batch_size_{1};
+    bool dynamic_batch_{};
+    std::size_t input_elements_per_sample_{};
     std::size_t output_elements_{};
+    std::size_t maximum_output_elements_{};
     DeviceBuffer input_buffer_;
     DeviceBuffer output_buffer_;
     PinnedHostBuffer host_input_;

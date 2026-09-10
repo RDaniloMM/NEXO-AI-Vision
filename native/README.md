@@ -201,24 +201,41 @@ telemetría JSON incluye además `capture_stream`, sin registrar la URL de la c�
 
 `NexoAIVisionLauncher.exe` y `NexoAIVision.exe` deben permanecer en la misma carpeta.
 El launcher resuelve el runtime hermano mediante la ruta absoluta de su propio
-módulo y usa `CreateProcessW`; no busca ejecutables mediante `PATH`. La interfaz
-expone la URL RTSP de la cámara, carpeta de salida, modo `PPE only`/`PPE + fall`,
-cómputo `Auto`/`CUDA`/`CPU`, transporte, decodificación, resolución de la fuente,
-FPS de la fuente, `imgsz` 640/768/960/1280, ocho confianzas EPP y `Show`. La
-resolución y frecuencia predeterminadas son `1920x1080` y `30 FPS`; para RTSP el
-launcher reemplaza o agrega los parámetros `resolution` y `fps` sin duplicarlos.
-Los archivos de video locales no se modifican.
+módulo y usa `CreateProcessW`; no busca ejecutables mediante `PATH`. La pantalla
+principal muestra una lista multiselección de perfiles y permite crear, editar,
+eliminar o seleccionar todas las cámaras. La vista anotada está implícitamente
+activada y ya no tiene un interruptor en el launcher.
+
+Cada perfil de conexión AXIS guarda por separado host, puerto, ruta, usuario,
+contraseña, resolución/FPS, compresión, MBR máximo, Zipstream, GOP/I-frame, audio,
+FPS dinámico, transporte y decodificación. El perfil inicial usa H.264 High,
+`1920x1080`, 25 FPS, compresión 30, MBR 6000 kbit/s, prioridad Quality, Zipstream
+10, GOP Fixed, intervalo I-frame 15, sin FPS dinámico, sin audio y RTSP/TCP. La URL
+se genera de forma canónica al iniciar; la tabla de parámetros es la autoridad para
+el intervalo 15 aunque un ejemplo antiguo incluya 25.
+
+Los ocho umbrales EPP están en **Perfil de umbrales EPP** y comienzan en `0.10`.
+Modo analítico, backend de cómputo e `imgsz` 640/768/960/1280 están en
+**Configuración avanzada**. Al seleccionar varias cámaras el runtime abre una vista
+por cámara, conserva sólo el frame más reciente, forma un micro-batch con los
+streams listos y ejecuta PPE y pose una vez por lote mediante una sola instancia
+de `NativeEnginePipeline`. Después divide la salida por cámara; tracking, votación
+EPP y caídas se mantienen aislados por ID. El bundle TensorRT incluido admite batch
+dinámico `1..4`; una selección mayor que el máximo del engine falla en `Validate`.
+
+Para regenerar engines multicámara, `tools/export_tensorrt.py` usa por defecto
+`--dynamic --batch 4`. `--fixed` y otro `--batch` siguen disponibles para pruebas
+o hardware distinto, pero un engine batch-1 no puede iniciar varias cámaras.
 `Load .env...` importa la configuración compatible del runtime nativo y conserva el
 archivo local fuera de Git; las opciones exclusivas de Python se ignoran y se
 informan en el estado. Los botones superiores cambian idioma y tema claro/oscuro.
-Idioma, tema, resolución/FPS, `imgsz` y confianzas se persisten atómicamente por usuario en
+Idioma, tema, `imgsz` y confianzas se persisten atómicamente por usuario en
 `%LocalAppData%\NexoAI Vision\operator-settings-v1.txt`; las credenciales permanecen
 exclusivamente en Credential Manager.
 `Validate` ejecuta el mismo plan con `--preflight`; `Start` inicia el procesamiento.
-`Saved camera` usa el `Camera ID` como nombre de perfil y guarda la URL RTSP
-completa solamente como una credencial genérica por usuario en Windows Credential
-Manager. Los perfiles se enumeran al abrir el launcher; `Save`, `Load` y `Delete`
-no exportan ni registran la URL. Las URLs RTSP completas nunca se escriben en
+Los perfiles se guardan como credenciales genéricas versionadas por usuario en
+Windows Credential Manager. Los perfiles legados que contenían una URL UTF-16 se
+leen y migran al editarlos. Las URLs RTSP completas nunca se escriben en
 `.env`, ProgramData ni logs; la salida del runtime continúa redactando userinfo
 antes de persistirse.
 

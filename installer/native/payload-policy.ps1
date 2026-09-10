@@ -2,6 +2,20 @@
 
 Set-StrictMode -Version Latest
 
+function Get-RelativePathCompat([string]$Root, [string]$Path) {
+    # Windows PowerShell 5.1 (.NET Framework) lacks [System.IO.Path]::GetRelativePath.
+    # Same contract for same-volume paths (backslash separators); falls back to a
+    # URI-based relative path otherwise. Shared via dot-sourcing by build-installer,
+    # test-installer and test-payload-policy.
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $pathFull = [System.IO.Path]::GetFullPath($Path)
+    if ($pathFull.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $pathFull.Substring($rootFull.Length)
+    }
+    return [System.Uri]::UnescapeDataString(
+        ([System.Uri]$rootFull).MakeRelativeUri([System.Uri]$pathFull).ToString())
+}
+
 function Get-ForbiddenPayloadFiles([string]$Root) {
     # Development inputs may exist in the repository but must never cross into MSI staging.
     $allowedExecutablePaths = @(
@@ -32,7 +46,7 @@ function Get-ForbiddenPayloadFiles([string]$Root) {
         '\.(cpp|cxx|cc|h|hpp|lib|pdb|obj|pfx|p12|pem|key|cer)$'
     )
     $violations = foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File) {
-        $relative = [System.IO.Path]::GetRelativePath($Root, $file.FullName)
+        $relative = Get-RelativePathCompat $Root $file.FullName
         if ($file.Extension -ieq '.exe' -and $relative -notin $allowedExecutablePaths) {
             $relative
             continue

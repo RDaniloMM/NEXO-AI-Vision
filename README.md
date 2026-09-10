@@ -14,14 +14,16 @@ incluye en el MSI.
 1. Obtén el MSI aprobado por la organización.
 2. Sigue la [guía de instalación para Windows](INSTALACION_WINDOWS.md).
 3. Abre **NexoAI Vision** desde Inicio.
-4. Guarda los perfiles RTSP mediante el launcher, que usa Windows Credential
-   Manager por usuario.
-5. Valida e inicia `NexoAIVision.exe` desde el mismo launcher.
+4. Crea uno o más perfiles AXIS en el launcher. Usuario, contraseña y parámetros
+   RTSP se guardan en Windows Credential Manager por usuario.
+5. Selecciona las cámaras que quieras ver, valida e inicia `NexoAIVision.exe`.
 
-El launcher usa exclusivamente el bundle administrado instalado. Permite elegir
-`imgsz` 640/768/960/1280 y una confianza para cada una de las ocho clases de salida;
-idioma, tema y esos valores se guardan por usuario. Las rutas de modelos y sus
-labels no son configuración del operador.
+La pantalla principal se centra en la gestión y selección multicámara. Los frames
+disponibles se agrupan en micro-batches TensorRT dinámicos (hasta 4 en el bundle)
+y comparten una sola instancia del motor; cada cámara conserva su propio tracking
+y estado temporal. Los umbrales EPP (0.10 por
+defecto en las ocho clases) y la configuración avanzada viven en modales separados.
+La vista anotada está siempre activa al iniciar desde el launcher.
 
 La preparación de confianza, verificación y mantenimiento corresponde a TI y se
 documenta en [Para TI](PARA_TI_WINDOWS.md). La referencia de ingeniería del MSI

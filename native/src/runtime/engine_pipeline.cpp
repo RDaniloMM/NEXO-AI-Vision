@@ -120,7 +120,7 @@ private:
 
 struct NativeEnginePipeline::Impl {
     explicit Impl(EnginePipelineConfig input)
-        : config(std::move(input)), analytics(config.analytics) {
+        : config(std::move(input)) {
         validateImageSize(config.image_size);
         validatePpeClassConfidences(config.ppe_class_confidences);
         summary.image_size = config.image_size;
@@ -140,6 +140,11 @@ struct NativeEnginePipeline::Impl {
             loadCudaOnnx();
         } else {
             throw std::invalid_argument("Engine pipeline requires a resolved backend and matching provider");
+        }
+        summary.maximum_batch_size = ppe_session->maximumBatchSize();
+        if (pose_session) {
+            summary.maximum_batch_size = std::min(
+                summary.maximum_batch_size, pose_session->maximumBatchSize());
         }
         cachePpeClassEnabledMask();
         if (config.telemetry != nullptr) {
@@ -547,7 +552,11 @@ struct NativeEnginePipeline::Impl {
         }
         const auto analytics_started = config.telemetry == nullptr
             ? std::chrono::steady_clock::time_point{} : std::chrono::steady_clock::now();
-        ProcessedFrame result = analytics.process({
+        auto [analytics_entry, inserted] = analytics_by_source.try_emplace(source_id, nullptr);
+        if (inserted) {
+            analytics_entry->second = std::make_unique<AnalyticsPipeline>(config.analytics);
+        }
+        ProcessedFrame result = analytics_entry->second->process({
             std::string(kContractVersion), std::move(source_id), frame_id,
             monotonic_timestamp_ms, std::move(observed_at), frame.cols, frame.rows,
             std::move(ppe_detections), std::move(poses), ppe_classes,
@@ -559,6 +568,137 @@ struct NativeEnginePipeline::Impl {
                 std::chrono::steady_clock::now() - pipeline_started);
         }
         return result;
+    }
+
+    std::vector<ProcessedFrame> processBatch(std::span<const EngineFrameInput> frames) {
+        if (frames.empty()) return {};
+        if (frames.size() == 1) {
+            const auto& frame = frames.front();
+            return {process(frame.frame, frame.source_id, frame.frame_id,
+                frame.monotonic_timestamp_ms, frame.observed_at)};
+        }
+        // Contract 1.0.0 sequential fallback: a micro-batch larger than the
+        // model optimization profile (e.g. N cameras on a batch-1 ONNX bundle)
+        // is served frame by frame through the single-frame path above, which
+        // owns the shared-engine lock per frame. Order and per-source
+        // analytics state are preserved; only throughput degrades.
+        if (frames.size() > summary.maximum_batch_size) {
+            std::vector<ProcessedFrame> sequential;
+            sequential.reserve(frames.size());
+            for (const auto& input : frames) {
+                sequential.push_back(process(input.frame, input.source_id, input.frame_id,
+                    input.monotonic_timestamp_ms, input.observed_at));
+            }
+            return sequential;
+        }
+        const auto mutex_wait_started = config.telemetry == nullptr
+            ? std::chrono::steady_clock::time_point{} : std::chrono::steady_clock::now();
+        std::unique_lock<std::mutex> process_lock(process_mutex);
+        if (config.telemetry != nullptr) {
+            config.telemetry->addSample(PerformanceStage::ProcessMutexWait,
+                std::chrono::steady_clock::now() - mutex_wait_started);
+        }
+        const auto pipeline_started = config.telemetry == nullptr
+            ? std::chrono::steady_clock::time_point{} : std::chrono::steady_clock::now();
+        std::vector<PreprocessedFrame> ppe_inputs;
+        std::vector<PreprocessedFrame> pose_inputs;
+        ppe_inputs.reserve(frames.size());
+        pose_inputs.reserve(frames.size());
+        const auto preprocess_started = config.telemetry == nullptr
+            ? std::chrono::steady_clock::time_point{} : std::chrono::steady_clock::now();
+        for (const auto& input : frames) {
+            if (input.frame.empty() || input.frame.type() != CV_8UC3) {
+                throw std::invalid_argument("Engine batch requires non-empty CV_8UC3 BGR frames");
+            }
+            ppe_inputs.push_back(ppe_preprocessor->process(input.frame));
+        }
+        if (config.telemetry != nullptr) {
+            config.telemetry->addSample(PerformanceStage::PpePreprocess,
+                std::chrono::steady_clock::now() - preprocess_started);
+        }
+        const auto pack = [](const std::vector<PreprocessedFrame>& inputs) {
+            std::vector<float> result;
+            if (!inputs.empty()) result.reserve(inputs.front().nchw().size() * inputs.size());
+            for (const auto& input : inputs) result.insert(result.end(), input.nchw().begin(), input.nchw().end());
+            return result;
+        };
+        std::vector<float> packed_ppe = pack(ppe_inputs);
+        const auto ppe_started = config.telemetry == nullptr
+            ? std::chrono::steady_clock::time_point{} : std::chrono::steady_clock::now();
+        const auto ppe_output = ppe_session->inferBatch(packed_ppe, frames.size());
+        if (config.telemetry != nullptr) {
+            config.telemetry->addSample(PerformanceStage::PpeInference,
+                std::chrono::steady_clock::now() - ppe_started);
+        }
+        if (ppe_output.shape.empty() || ppe_output.shape.front() != static_cast<std::int64_t>(frames.size())
+            || ppe_output.values.size() % frames.size() != 0) {
+            throw std::runtime_error("PPE model returned an invalid batched output");
+        }
+        std::vector<std::int64_t> ppe_shape(ppe_output.shape.begin(), ppe_output.shape.end());
+        ppe_shape.front() = 1;
+        const std::size_t ppe_stride = ppe_output.values.size() / frames.size();
+        std::vector<std::vector<Detection>> ppe_detections(frames.size());
+        for (std::size_t index = 0; index < frames.size(); ++index) {
+            ppe_detections[index] = decodeDetections(
+                {ppe_output.values.subspan(index * ppe_stride, ppe_stride), ppe_shape},
+                ppe_names.size(), config.ppe_class_confidences, ppe_class_enabled, config.nms_iou,
+                ppe_inputs[index].transform,
+                {DecodeLimits{}.max_nms_candidates, config.maximum_detections});
+        }
+
+        std::vector<std::vector<PoseDetection>> poses(frames.size());
+        if (pose_session) {
+            const auto pose_preprocess_started = config.telemetry == nullptr
+                ? std::chrono::steady_clock::time_point{} : std::chrono::steady_clock::now();
+            if (shared_preprocessing) pose_inputs = ppe_inputs;
+            else for (const auto& input : frames) pose_inputs.push_back(pose_preprocessor->process(input.frame));
+            if (config.telemetry != nullptr) {
+                config.telemetry->addSample(PerformanceStage::PosePreprocess,
+                    std::chrono::steady_clock::now() - pose_preprocess_started);
+            }
+            std::vector<float> packed_pose = pack(pose_inputs);
+            const auto pose_started = config.telemetry == nullptr
+                ? std::chrono::steady_clock::time_point{} : std::chrono::steady_clock::now();
+            const auto pose_output = pose_session->inferBatch(packed_pose, frames.size());
+            if (config.telemetry != nullptr) {
+                config.telemetry->addSample(PerformanceStage::PoseInference,
+                    std::chrono::steady_clock::now() - pose_started);
+            }
+            if (pose_output.shape.empty() || pose_output.shape.front() != static_cast<std::int64_t>(frames.size())
+                || pose_output.values.size() % frames.size() != 0) {
+                throw std::runtime_error("Pose model returned an invalid batched output");
+            }
+            std::vector<std::int64_t> pose_shape(pose_output.shape.begin(), pose_output.shape.end());
+            pose_shape.front() = 1;
+            const std::size_t pose_stride = pose_output.values.size() / frames.size();
+            for (std::size_t index = 0; index < frames.size(); ++index) {
+                poses[index] = decodePoses(
+                    {pose_output.values.subspan(index * pose_stride, pose_stride), pose_shape},
+                    pose_class_count, static_cast<std::size_t>(keypoint_shape[0]),
+                    static_cast<std::size_t>(keypoint_shape[1]),
+                    config.analytics.tracker.low_confidence_threshold, config.nms_iou,
+                    pose_inputs[index].transform,
+                    {DecodeLimits{}.max_nms_candidates, config.maximum_detections});
+            }
+        }
+        std::vector<ProcessedFrame> results;
+        results.reserve(frames.size());
+        for (std::size_t index = 0; index < frames.size(); ++index) {
+            const auto& input = frames[index];
+            auto [analytics_entry, inserted] = analytics_by_source.try_emplace(input.source_id, nullptr);
+            if (inserted) analytics_entry->second = std::make_unique<AnalyticsPipeline>(config.analytics);
+            results.push_back(analytics_entry->second->process({
+                std::string(kContractVersion), input.source_id, input.frame_id,
+                input.monotonic_timestamp_ms, input.observed_at,
+                input.frame.cols, input.frame.rows, std::move(ppe_detections[index]),
+                std::move(poses[index]), ppe_classes,
+            }));
+        }
+        if (config.telemetry != nullptr) {
+            config.telemetry->addSample(PerformanceStage::PipelineTotal,
+                std::chrono::steady_clock::now() - pipeline_started);
+        }
+        return results;
     }
 
     bool personDetectedInPpe(const std::vector<Detection>& detections) const noexcept {
@@ -591,7 +731,7 @@ struct NativeEnginePipeline::Impl {
     std::unique_ptr<InferenceSession> pose_session;
     std::unique_ptr<LetterboxPreprocessor> ppe_preprocessor;
     std::unique_ptr<LetterboxPreprocessor> pose_preprocessor;
-    AnalyticsPipeline analytics;
+    std::map<std::string, std::unique_ptr<AnalyticsPipeline>> analytics_by_source;
     std::mutex process_mutex;
     bool hybrid_pose_executor{};
     bool shared_preprocessing{};
@@ -617,7 +757,12 @@ ProcessedFrame NativeEnginePipeline::processFrame(
 
 void NativeEnginePipeline::reset() noexcept {
     std::scoped_lock lock(impl_->process_mutex);
-    impl_->analytics.reset();
+    impl_->analytics_by_source.clear();
+}
+
+std::vector<ProcessedFrame> NativeEnginePipeline::processBatch(
+    std::span<const EngineFrameInput> frames) {
+    return impl_->processBatch(frames);
 }
 
 const EnginePipelineSummary& NativeEnginePipeline::summary() const noexcept {

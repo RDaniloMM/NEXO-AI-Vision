@@ -51,6 +51,11 @@ if(WIN32 AND (CUAJONE_BUILD_LAUNCHER OR CUAJONE_BUILD_RUNTIME))
             "${CUAJONE_PRODUCT_SVG}"
         VERBATIM)
     configure_file(resources/launcher.rc.in "${CUAJONE_PRODUCT_RESOURCE}" @ONLY)
+    # NOTE: do not add per-source COMPILE_FLAGS "/c 65001" here. The template
+    # starts with `#pragma code_page(65001)`, which already forces rc.exe to
+    # read UTF-8. Extra RC flags are forwarded by cmcldeps to cl.exe during
+    # Ninja dependency scanning, where the bare `65001` token fails the build
+    # (c1 C1083).
     set_source_files_properties("${CUAJONE_PRODUCT_RESOURCE}" PROPERTIES
         OBJECT_DEPENDS "${CUAJONE_PRODUCT_ICON}")
     add_custom_target(cuajone_product_icon DEPENDS "${CUAJONE_PRODUCT_ICON}")
@@ -74,6 +79,8 @@ if(CUAJONE_BUILD_LAUNCHER)
         set(launcher_version_resource "${CMAKE_CURRENT_BINARY_DIR}/launcher_version.rc")
         cuajone_launcher_version("${CUAJONE_FILE_VERSION}" "${CUAJONE_PRODUCT_VERSION}"
             "${launcher_version_resource}")
+        # NOTE: launcher_version.rc carries ASCII only, so no codepage flag is
+        # needed (see note above about cmcldeps forwarding RC flags to cl.exe).
         add_executable(cuajone_launcher WIN32 src/launcher/launcher.cpp
             "${CUAJONE_PRODUCT_RESOURCE}" "${launcher_version_resource}")
         add_dependencies(cuajone_launcher cuajone_product_icon)
@@ -400,6 +407,29 @@ if(CUAJONE_BUILD_RUNTIME)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:cuajone_onnxruntime>
             $<TARGET_FILE_DIR:cuajone_native>)
+    # Double-click support without activate-native.ps1: the Windows loader
+    # resolves DLLs next to the executable, so stage the OpenCV runtime DLLs
+    # app-local beside NexoAIVision.exe (the launcher sibling shares the same
+    # directory, so its CreateProcessW child inherits this closure). The MSI
+    # already stages its own bin\ closure in installer/native/build-installer.ps1;
+    # this only affects dev build output directories, never installer payloads.
+    get_filename_component(_CUAJONE_OPENCV_BIN "${OpenCV_DIR}/../bin" ABSOLUTE)
+    file(GLOB _CUAJONE_OPENCV_WORLD_DLLS "${_CUAJONE_OPENCV_BIN}/opencv_world*.dll")
+    file(GLOB _CUAJONE_OPENCV_FFMPEG_DLLS "${_CUAJONE_OPENCV_BIN}/opencv_videoio_ffmpeg*_64.dll")
+    foreach(_CUAJONE_OPENCV_DLL IN LISTS _CUAJONE_OPENCV_WORLD_DLLS _CUAJONE_OPENCV_FFMPEG_DLLS)
+        # Skip debug-suffixed variants (opencv_world4120d.dll); presets build Release.
+        if(_CUAJONE_OPENCV_DLL MATCHES "d\\.dll$")
+            continue()
+        endif()
+        add_custom_command(TARGET cuajone_native POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_CUAJONE_OPENCV_DLL}"
+                $<TARGET_FILE_DIR:cuajone_native>)
+    endforeach()
+    unset(_CUAJONE_OPENCV_BIN)
+    unset(_CUAJONE_OPENCV_WORLD_DLLS)
+    unset(_CUAJONE_OPENCV_FFMPEG_DLLS)
+    unset(_CUAJONE_OPENCV_DLL)
     if(CUAJONE_ENABLE_TENSORRT)
         target_link_libraries(cuajone_native PRIVATE delayimp)
         target_link_options(cuajone_native PRIVATE

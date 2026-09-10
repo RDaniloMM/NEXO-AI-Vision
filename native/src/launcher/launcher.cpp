@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #include "cuajone/launcher_support.hpp"
+#include "cuajone/launcher_resources.h"
 #include "cuajone/launcher_version.hpp"
 
 #include <windows.h>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cwctype>
 #include <cwchar>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -55,6 +57,9 @@ struct LauncherWindow;
 std::filesystem::path siblingRuntime();
 void persistPreferences(LauncherWindow& state);
 void showError(LauncherWindow& state, const std::exception& error);
+void openPpeProfileDialog(LauncherWindow& state);
+void openAdvancedSettingsDialog(LauncherWindow& state);
+void loadEnv(LauncherWindow& state);
 LRESULT CALLBACK thresholdWheelProcedure(
     HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR reference);
 
@@ -63,7 +68,6 @@ enum ControlId : int {
     SourceLabelEdit,
     LanguageButton,
     ThemeButton,
-    LoadEnvButton,
     OpenLogButton,
     OutputEdit,
     OutputBrowse,
@@ -87,6 +91,9 @@ enum ControlId : int {
     SaveCameraButton,
     LoadCameraButton,
     DeleteCameraButton,
+    AddCameraButton,
+    EditCameraButton,
+    SelectAllCameraButton,
     MenuButton,
     PerformanceMenu = 400,
     AboutMenu,
@@ -110,6 +117,9 @@ struct LauncherWindow {
     HWND save_camera{};
     HWND load_camera{};
     HWND delete_camera{};
+    HWND add_camera{};
+    HWND edit_camera{};
+    HWND select_all_camera{};
     HWND language{};
     HWND theme_button{};
     HWND output{};
@@ -150,6 +160,8 @@ struct LauncherWindow {
     bool close_requested{};
     bool spanish{};
     bool dark{};
+    AnalyticsMode analytics_mode{AnalyticsMode::PpeFall};
+    ComputeMode compute_mode{ComputeMode::Auto};
 };
 
 struct Palette {
@@ -258,6 +270,13 @@ void showLauncherMenu(LauncherWindow& state) {
     AppendMenuW(menu, MF_POPUP | editable, reinterpret_cast<UINT_PTR>(intervals),
         state.spanish ? L"&Intervalo de telemetría" : L"Telemetry &interval");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING | editable, IDM_PPE_PROFILE,
+        state.spanish ? L"Perfil de umbrales EPP" : L"PPE threshold profile");
+    AppendMenuW(menu, MF_STRING | editable, IDM_ADVANCED_SETTINGS,
+        state.spanish ? L"Configuración avanzada" : L"Advanced settings");
+    AppendMenuW(menu, MF_STRING | editable, IDM_LOAD_ENV,
+        state.spanish ? L"Importar .env" : L"Import .env");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, AboutMenu,
         state.spanish ? L"&Acerca de Nexo AI Vision" : L"&About Nexo AI Vision");
     RECT anchor{};
@@ -265,6 +284,19 @@ void showLauncherMenu(LauncherWindow& state) {
     const UINT selected = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
         anchor.left, anchor.bottom, state.window, nullptr);
     DestroyMenu(menu);
+    // These dialogs are reachable only through the Menu popup (see WM_COMMAND).
+    if (selected == IDM_PPE_PROFILE) {
+        openPpeProfileDialog(state);
+        return;
+    }
+    if (selected == IDM_ADVANCED_SETTINGS) {
+        openAdvancedSettingsDialog(state);
+        return;
+    }
+    if (selected == IDM_LOAD_ENV) {
+        loadEnv(state);
+        return;
+    }
     if (selected == AboutMenu) {
         const auto version = runningLauncherVersion();
         const std::wstring text = (state.spanish
@@ -314,19 +346,85 @@ std::string utf8FromWide(std::wstring_view value) {
     return result;
 }
 
+// Decode an exception message for display: error messages are UTF-8, but fall
+// back to the system ANSI codepage so legacy text never shows as mojibake.
+std::wstring errorMessageWide(const std::exception& error) {
+    const std::string narrow(error.what());
+    if (narrow.empty()) return {};
+    int length = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, narrow.data(), static_cast<int>(narrow.size()), nullptr, 0);
+    UINT codepage = CP_UTF8;
+    DWORD flags = MB_ERR_INVALID_CHARS;
+    if (length <= 0) {
+        length = MultiByteToWideChar(
+            CP_ACP, 0, narrow.data(), static_cast<int>(narrow.size()), nullptr, 0);
+        codepage = CP_ACP;
+        flags = 0;
+    }
+    if (length <= 0) return {};
+    std::wstring wide(static_cast<std::size_t>(length), L'\0');
+    if (MultiByteToWideChar(
+            codepage, flags, narrow.data(), static_cast<int>(narrow.size()),
+            wide.data(), length) <= 0) {
+        return {};
+    }
+    return wide;
+}
+
+// Decode one raw .env line: strict UTF-8 first, ANSI fallback for files saved
+// with a legacy editor codepage (e.g. cp1252).
+std::wstring decodeEnvLine(std::string_view line) {
+    if (line.empty()) return {};
+    int length = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, line.data(), static_cast<int>(line.size()), nullptr, 0);
+    UINT codepage = CP_UTF8;
+    DWORD flags = MB_ERR_INVALID_CHARS;
+    if (length <= 0) {
+        length = MultiByteToWideChar(
+            CP_ACP, 0, line.data(), static_cast<int>(line.size()), nullptr, 0);
+        codepage = CP_ACP;
+        flags = 0;
+    }
+    if (length <= 0) throw std::runtime_error("The selected .env file has undecodable lines");
+    std::wstring wide(static_cast<std::size_t>(length), L'\0');
+    if (MultiByteToWideChar(
+            codepage, flags, line.data(), static_cast<int>(line.size()),
+            wide.data(), length) <= 0) {
+        throw std::runtime_error("The selected .env file has undecodable lines");
+    }
+    return wide;
+}
+
 std::runtime_error savedCameraProfileError(std::string_view action, std::wstring_view profile) {
     return std::runtime_error(std::string(action) + ": " + utf8FromWide(profile));
 }
 
 std::optional<std::wstring> selectedSavedCameraProfile(const LauncherWindow& state) {
-    const LRESULT selection = SendMessageW(state.saved_camera, CB_GETCURSEL, 0, 0);
-    if (selection == CB_ERR) return std::nullopt;
-    const LRESULT length = SendMessageW(state.saved_camera, CB_GETLBTEXTLEN, selection, 0);
-    if (length == CB_ERR) return std::nullopt;
+    const LRESULT selection = SendMessageW(state.saved_camera, LB_GETCURSEL, 0, 0);
+    if (selection == LB_ERR) return std::nullopt;
+    const LRESULT length = SendMessageW(state.saved_camera, LB_GETTEXTLEN, selection, 0);
+    if (length == LB_ERR) return std::nullopt;
     std::wstring profile(static_cast<std::size_t>(length) + 1, L'\0');
-    SendMessageW(state.saved_camera, CB_GETLBTEXT, selection, reinterpret_cast<LPARAM>(profile.data()));
+    SendMessageW(state.saved_camera, LB_GETTEXT, selection, reinterpret_cast<LPARAM>(profile.data()));
     profile.resize(static_cast<std::size_t>(length));
     return isValidSavedCameraProfileName(profile) ? std::optional<std::wstring>(std::move(profile)) : std::nullopt;
+}
+
+std::vector<std::wstring> selectedSavedCameraProfiles(const LauncherWindow& state) {
+    const LRESULT count = SendMessageW(state.saved_camera, LB_GETSELCOUNT, 0, 0);
+    if (count == LB_ERR || count == 0) return {};
+    std::vector<int> indices(static_cast<std::size_t>(count));
+    SendMessageW(state.saved_camera, LB_GETSELITEMS, count, reinterpret_cast<LPARAM>(indices.data()));
+    std::vector<std::wstring> result;
+    for (const int index : indices) {
+        const LRESULT length = SendMessageW(state.saved_camera, LB_GETTEXTLEN, index, 0);
+        if (length == LB_ERR) continue;
+        std::wstring profile(static_cast<std::size_t>(length) + 1, L'\0');
+        SendMessageW(state.saved_camera, LB_GETTEXT, index, reinterpret_cast<LPARAM>(profile.data()));
+        profile.resize(static_cast<std::size_t>(length));
+        if (isValidSavedCameraProfileName(profile)) result.push_back(std::move(profile));
+    }
+    return result;
 }
 
 void refreshSavedCameraProfiles(LauncherWindow& state, std::wstring_view preferred = {}) {
@@ -348,80 +446,75 @@ void refreshSavedCameraProfiles(LauncherWindow& state, std::wstring_view preferr
     }
     std::sort(profiles.begin(), profiles.end());
     profiles.erase(std::unique(profiles.begin(), profiles.end()), profiles.end());
-    SendMessageW(state.saved_camera, CB_RESETCONTENT, 0, 0);
+    SendMessageW(state.saved_camera, LB_RESETCONTENT, 0, 0);
     for (const auto& profile : profiles) {
         const LRESULT index = SendMessageW(
-            state.saved_camera, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(profile.c_str()));
-        if (index != CB_ERR && profile == preferred) {
-            SendMessageW(state.saved_camera, CB_SETCURSEL, index, 0);
+            state.saved_camera, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(profile.c_str()));
+        if (index != LB_ERR && profile == preferred) {
+            SendMessageW(state.saved_camera, LB_SETCURSEL, index, 0);
+            SendMessageW(state.saved_camera, LB_SETSEL, TRUE, index);
         }
     }
 }
 
-void saveSavedCameraProfile(LauncherWindow& state) {
-    const std::wstring profile = trim(editText(state.source_label));
-    if (!isValidSavedCameraProfileName(profile)) {
-        throw std::invalid_argument("Saved camera profile name is invalid");
-    }
-    const std::wstring source = trim(editText(state.source));
-    validateRtspCameraUrl(source);
-    if (source.size() > CRED_MAX_CREDENTIAL_BLOB_SIZE / sizeof(wchar_t)) {
-        throw std::invalid_argument("RTSP camera URL is too long to save");
-    }
-    const std::wstring target = savedCameraCredentialTarget(profile);
+void writeSavedCameraProfile(const CameraConnectionProfile& profile) {
+    const std::string payload = serializeCameraConnectionProfile(profile);
+    if (payload.size() > CRED_MAX_CREDENTIAL_BLOB_SIZE) throw std::invalid_argument("Camera profile is too large");
+    const std::wstring target = savedCameraCredentialTarget(profile.name);
     CREDENTIALW credential{};
     credential.Type = CRED_TYPE_GENERIC;
     credential.TargetName = const_cast<LPWSTR>(target.c_str());
-    credential.CredentialBlobSize = static_cast<DWORD>(source.size() * sizeof(wchar_t));
-    credential.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<wchar_t*>(source.data()));
+    credential.CredentialBlobSize = static_cast<DWORD>(payload.size());
+    credential.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<char*>(payload.data()));
     credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
     if (!CredWriteW(&credential, 0)) {
-        throw savedCameraProfileError("Could not save camera profile", profile);
+        throw savedCameraProfileError("Could not save camera profile", profile.name);
     }
-    SetWindowTextW(state.source_label, profile.c_str());
-    refreshSavedCameraProfiles(state, profile);
-    setStatus(state, (state.spanish ? L"Perfil de cámara guardado: " : L"Saved camera profile: ") + profile);
 }
 
-void loadSavedCameraProfile(LauncherWindow& state) {
-    const auto profile = selectedSavedCameraProfile(state);
-    if (!profile) throw std::invalid_argument("Select a saved camera profile");
-    const std::wstring target = savedCameraCredentialTarget(*profile);
+CameraConnectionProfile readSavedCameraProfile(std::wstring_view profile) {
+    const std::wstring target = savedCameraCredentialTarget(profile);
     PCREDENTIALW credential = nullptr;
     if (!CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &credential)) {
-        throw savedCameraProfileError("Could not load camera profile", *profile);
+        throw savedCameraProfileError("Could not load camera profile", profile);
     }
-    const bool valid_blob = credential->CredentialBlob != nullptr
-        && credential->CredentialBlobSize != 0
-        && credential->CredentialBlobSize % sizeof(wchar_t) == 0;
-    std::wstring source;
-    if (valid_blob) {
-        const auto* text = reinterpret_cast<const wchar_t*>(credential->CredentialBlob);
-        source.assign(text, credential->CredentialBlobSize / sizeof(wchar_t));
+    std::vector<std::byte> blob(credential->CredentialBlobSize);
+    if (!blob.empty() && credential->CredentialBlob != nullptr) {
+        std::memcpy(blob.data(), credential->CredentialBlob, blob.size());
     }
     CredFree(credential);
-    if (!valid_blob) {
-        throw savedCameraProfileError("Saved camera profile is invalid", *profile);
-    }
+    if (blob.empty()) throw savedCameraProfileError("Saved camera profile is invalid", profile);
     try {
-        validateRtspCameraUrl(source);
+        const std::string_view bytes(reinterpret_cast<const char*>(blob.data()), blob.size());
+        if (bytes.starts_with("schema_version=")) {
+            return parseCameraConnectionProfile(bytes, profile);
+        }
+        if (blob.size() % sizeof(wchar_t) != 0) throw std::invalid_argument("Invalid legacy profile");
+        const auto* text = reinterpret_cast<const wchar_t*>(blob.data());
+        return parseLegacyCameraUrl(
+            std::wstring_view(text, blob.size() / sizeof(wchar_t)), profile);
     } catch (const std::exception&) {
-        throw savedCameraProfileError("Saved camera profile is invalid", *profile);
+        throw savedCameraProfileError("Saved camera profile is invalid", profile);
     }
-    SetWindowTextW(state.source_label, profile->c_str());
-    SetWindowTextW(state.source, source.c_str());
-    setStatus(state, (state.spanish ? L"Perfil de cámara cargado: " : L"Saved camera profile loaded: ") + *profile);
 }
 
 void deleteSavedCameraProfile(LauncherWindow& state) {
-    const auto profile = selectedSavedCameraProfile(state);
-    if (!profile) throw std::invalid_argument("Select a saved camera profile");
-    const std::wstring target = savedCameraCredentialTarget(*profile);
-    if (!CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0)) {
-        throw savedCameraProfileError("Could not delete camera profile", *profile);
+    const auto profiles = selectedSavedCameraProfiles(state);
+    if (profiles.empty()) throw std::invalid_argument("Select one or more saved camera profiles");
+    for (const auto& profile : profiles) {
+        const std::wstring target = savedCameraCredentialTarget(profile);
+        if (!CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0)) {
+            throw savedCameraProfileError("Could not delete camera profile", profile);
+        }
     }
     refreshSavedCameraProfiles(state);
-    setStatus(state, (state.spanish ? L"Perfil de cámara eliminado: " : L"Saved camera profile deleted: ") + *profile);
+    if (SendMessageW(state.saved_camera, LB_GETCOUNT, 0, 0) == 0) {
+        CameraConnectionProfile default_profile;
+        default_profile.name = L"CAMARA_AXIS_01";
+        writeSavedCameraProfile(default_profile);
+        refreshSavedCameraProfiles(state, default_profile.name);
+    }
+    setStatus(state, state.spanish ? L"Perfiles de cámara eliminados" : L"Camera profiles deleted");
 }
 
 std::map<std::wstring, std::wstring> readEnvFile(const std::filesystem::path& path) {
@@ -429,15 +522,14 @@ std::map<std::wstring, std::wstring> readEnvFile(const std::filesystem::path& pa
     if (!input) throw std::runtime_error("Could not open the selected .env file");
     std::map<std::wstring, std::wstring> values;
     std::string line;
+    bool first_line = true;
     while (std::getline(input, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (line.starts_with("\xEF\xBB\xBF")) line.erase(0, 3);
-        const int length = MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, line.data(), static_cast<int>(line.size()), nullptr, 0);
-        if (length <= 0) throw std::runtime_error("The selected .env file is not valid UTF-8");
-        std::wstring wide(static_cast<std::size_t>(length), L'\0');
-        MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, line.data(), static_cast<int>(line.size()), wide.data(), length);
+        if (first_line && line.starts_with("\xEF\xBB\xBF")) line.erase(0, 3);
+        first_line = false;
+        std::wstring wide = decodeEnvLine(line);
+        // Strip a decoded BOM mark (covers UTF-8 BOM and ANSI-decoded "ï»¿").
+        if (!wide.empty() && wide.front() == L'\uFEFF') wide.erase(0, 1);
         wide = trim(wide);
         if (wide.empty() || wide.starts_with(L"#")) continue;
         const std::size_t separator = wide.find(L'=');
@@ -667,6 +759,229 @@ void setThresholdComboValue(HWND combo, int hundredths) {
     SetWindowTextW(combo, text.c_str());
 }
 
+struct CameraDialogContext {
+    CameraConnectionProfile profile;
+};
+
+int dialogInteger(HWND dialog, int id, const char* field) {
+    const std::wstring value = trim(editText(GetDlgItem(dialog, id)));
+    if (value.empty()) throw std::invalid_argument(std::string(field) + " is required");
+    std::size_t used{};
+    const int result = std::stoi(value, &used);
+    if (used != value.size()) throw std::invalid_argument(std::string(field) + " must be an integer");
+    return result;
+}
+
+INT_PTR CALLBACK cameraDialogProcedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) {
+    auto* context = reinterpret_cast<CameraDialogContext*>(GetWindowLongPtrW(dialog, DWLP_USER));
+    if (message == WM_INITDIALOG) {
+        context = reinterpret_cast<CameraDialogContext*>(lparam);
+        SetWindowLongPtrW(dialog, DWLP_USER, reinterpret_cast<LONG_PTR>(context));
+        const auto& profile = context->profile;
+        SetDlgItemTextW(dialog, IDC_PROFILE_NAME, profile.name.c_str());
+        SetDlgItemTextW(dialog, IDC_CAMERA_USER, profile.username.c_str());
+        SetDlgItemTextW(dialog, IDC_CAMERA_PASSWORD, profile.password.c_str());
+        SetDlgItemTextW(dialog, IDC_CAMERA_HOST, profile.host.c_str());
+        SetDlgItemInt(dialog, IDC_CAMERA_PORT, profile.port, FALSE);
+        SetDlgItemTextW(dialog, IDC_CAMERA_PATH, profile.path.c_str());
+        for (const auto resolution : kStreamResolutions) {
+            const std::wstring value(resolution);
+            SendDlgItemMessageW(dialog, IDC_CAMERA_RESOLUTION, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value.c_str()));
+        }
+        for (const int fps : kStreamFrameRates) {
+            const std::wstring value = std::to_wstring(fps);
+            SendDlgItemMessageW(dialog, IDC_CAMERA_FPS, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value.c_str()));
+        }
+        const auto resolution = std::ranges::find(kStreamResolutions, std::wstring_view(profile.resolution));
+        const auto fps = std::ranges::find(kStreamFrameRates, profile.fps);
+        SendDlgItemMessageW(dialog, IDC_CAMERA_RESOLUTION, CB_SETCURSEL,
+            resolution == kStreamResolutions.end() ? 3 : resolution - kStreamResolutions.begin(), 0);
+        SendDlgItemMessageW(dialog, IDC_CAMERA_FPS, CB_SETCURSEL,
+            fps == kStreamFrameRates.end() ? 4 : fps - kStreamFrameRates.begin(), 0);
+        SetDlgItemInt(dialog, IDC_CAMERA_COMPRESSION, profile.compression, FALSE);
+        SetDlgItemInt(dialog, IDC_CAMERA_BITRATE, profile.maximum_bitrate_kbps, FALSE);
+        SetDlgItemInt(dialog, IDC_CAMERA_ZIPSTREAM, profile.zipstream_strength, FALSE);
+        SetDlgItemInt(dialog, IDC_CAMERA_IFRAME, profile.keyframe_interval, FALSE);
+        CheckDlgButton(dialog, IDC_CAMERA_DYNAMIC_FPS, profile.dynamic_fps ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog, IDC_CAMERA_AUDIO, profile.audio ? BST_CHECKED : BST_UNCHECKED);
+        for (const wchar_t* value : {L"RTSP/TCP", L"RTSP/UDP", L"Predeterminado"}) {
+            SendDlgItemMessageW(dialog, IDC_CAMERA_TRANSPORT, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value));
+        }
+        SendDlgItemMessageW(dialog, IDC_CAMERA_TRANSPORT, CB_SETCURSEL,
+            profile.transport == RtspTransport::Udp ? 1 : profile.transport == RtspTransport::Default ? 2 : 0, 0);
+        for (const wchar_t* value : {L"Auto", L"D3D11", L"CPU"}) {
+            SendDlgItemMessageW(dialog, IDC_CAMERA_ACCELERATION, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value));
+        }
+        SendDlgItemMessageW(dialog, IDC_CAMERA_ACCELERATION, CB_SETCURSEL,
+            profile.video_acceleration == VideoAcceleration::D3d11 ? 1
+                : profile.video_acceleration == VideoAcceleration::Cpu ? 2 : 0, 0);
+        return TRUE;
+    }
+    if (message != WM_COMMAND || context == nullptr) return FALSE;
+    if (LOWORD(wparam) == IDCANCEL) {
+        EndDialog(dialog, IDCANCEL);
+        return TRUE;
+    }
+    if (LOWORD(wparam) != IDOK) return FALSE;
+    try {
+        auto& profile = context->profile;
+        profile.name = trim(editText(GetDlgItem(dialog, IDC_PROFILE_NAME)));
+        profile.username = editText(GetDlgItem(dialog, IDC_CAMERA_USER));
+        profile.password = editText(GetDlgItem(dialog, IDC_CAMERA_PASSWORD));
+        profile.host = trim(editText(GetDlgItem(dialog, IDC_CAMERA_HOST)));
+        profile.port = static_cast<std::uint16_t>(dialogInteger(dialog, IDC_CAMERA_PORT, "Port"));
+        profile.path = trim(editText(GetDlgItem(dialog, IDC_CAMERA_PATH)));
+        const auto resolution = SendDlgItemMessageW(dialog, IDC_CAMERA_RESOLUTION, CB_GETCURSEL, 0, 0);
+        const auto fps = SendDlgItemMessageW(dialog, IDC_CAMERA_FPS, CB_GETCURSEL, 0, 0);
+        if (resolution == CB_ERR || fps == CB_ERR) throw std::invalid_argument("Resolution and FPS are required");
+        profile.resolution = kStreamResolutions[static_cast<std::size_t>(resolution)];
+        profile.fps = kStreamFrameRates[static_cast<std::size_t>(fps)];
+        profile.compression = dialogInteger(dialog, IDC_CAMERA_COMPRESSION, "Compression");
+        profile.maximum_bitrate_kbps = dialogInteger(dialog, IDC_CAMERA_BITRATE, "Maximum bitrate");
+        profile.zipstream_strength = dialogInteger(dialog, IDC_CAMERA_ZIPSTREAM, "Zipstream");
+        profile.keyframe_interval = dialogInteger(dialog, IDC_CAMERA_IFRAME, "I-frame interval");
+        profile.dynamic_fps = IsDlgButtonChecked(dialog, IDC_CAMERA_DYNAMIC_FPS) == BST_CHECKED;
+        profile.audio = IsDlgButtonChecked(dialog, IDC_CAMERA_AUDIO) == BST_CHECKED;
+        const auto transport = SendDlgItemMessageW(dialog, IDC_CAMERA_TRANSPORT, CB_GETCURSEL, 0, 0);
+        profile.transport = transport == 1 ? RtspTransport::Udp : transport == 2 ? RtspTransport::Default : RtspTransport::Tcp;
+        const auto acceleration = SendDlgItemMessageW(dialog, IDC_CAMERA_ACCELERATION, CB_GETCURSEL, 0, 0);
+        profile.video_acceleration = acceleration == 1 ? VideoAcceleration::D3d11
+            : acceleration == 2 ? VideoAcceleration::Cpu : VideoAcceleration::Auto;
+        validateCameraConnectionProfile(profile);
+        EndDialog(dialog, IDOK);
+    } catch (const std::exception& error) {
+        const std::wstring error_text = errorMessageWide(error);
+        MessageBoxW(dialog, error_text.c_str(), L"Perfil de cámara", MB_OK | MB_ICONERROR);
+    }
+    return TRUE;
+}
+
+bool editCameraProfile(LauncherWindow& state, CameraConnectionProfile& profile) {
+    CameraDialogContext context{profile};
+    const INT_PTR result = DialogBoxParamW(
+        GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_CAMERA_PROFILE), state.window,
+        cameraDialogProcedure, reinterpret_cast<LPARAM>(&context));
+    if (result == -1) throw std::runtime_error("Could not open camera profile dialog");
+    if (result != IDOK) return false;
+    profile = std::move(context.profile);
+    return true;
+}
+
+INT_PTR CALLBACK ppeDialogProcedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) {
+    auto* state = reinterpret_cast<LauncherWindow*>(GetWindowLongPtrW(dialog, DWLP_USER));
+    constexpr std::array<std::size_t, cuajone::kPpeItemCount> item_class_ids{0, 2, 3, 4, 5, 6, 7};
+    if (message == WM_INITDIALOG) {
+        state = reinterpret_cast<LauncherWindow*>(lparam);
+        SetWindowLongPtrW(dialog, DWLP_USER, reinterpret_cast<LONG_PTR>(state));
+        for (std::size_t index = 0; index < kPpeOutputLabels.size(); ++index) {
+            populateThresholdCombo(GetDlgItem(dialog, IDC_PPE_THRESHOLD_BASE + static_cast<int>(index)),
+                state->preferences.ppe_class_confidences[index]);
+        }
+        for (std::size_t index = 0; index < item_class_ids.size(); ++index) {
+            CheckDlgButton(dialog, IDC_PPE_ENABLED_BASE + static_cast<int>(index),
+                state->preferences.ppe_enabled[index] ? BST_CHECKED : BST_UNCHECKED);
+        }
+        return TRUE;
+    }
+    if (message != WM_COMMAND || state == nullptr) return FALSE;
+    if (LOWORD(wparam) == IDCANCEL) { EndDialog(dialog, IDCANCEL); return TRUE; }
+    if (LOWORD(wparam) != IDOK) return FALSE;
+    try {
+        for (std::size_t index = 0; index < kPpeOutputLabels.size(); ++index) {
+            state->preferences.ppe_class_confidences[index] = parsePpeConfidenceThreshold(
+                editText(GetDlgItem(dialog, IDC_PPE_THRESHOLD_BASE + static_cast<int>(index))));
+        }
+        for (std::size_t index = 0; index < item_class_ids.size(); ++index) {
+            state->preferences.ppe_enabled[index] = IsDlgButtonChecked(
+                dialog, IDC_PPE_ENABLED_BASE + static_cast<int>(index)) == BST_CHECKED;
+        }
+        saveOperatorPreferencesAtomic(state->preferences_path, state->preferences);
+        EndDialog(dialog, IDOK);
+    } catch (const std::exception& error) {
+        const std::wstring text = errorMessageWide(error);
+        MessageBoxW(dialog, text.c_str(), L"Perfil EPP", MB_OK | MB_ICONERROR);
+    }
+    return TRUE;
+}
+
+INT_PTR CALLBACK advancedDialogProcedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) {
+    auto* state = reinterpret_cast<LauncherWindow*>(GetWindowLongPtrW(dialog, DWLP_USER));
+    if (message == WM_INITDIALOG) {
+        state = reinterpret_cast<LauncherWindow*>(lparam);
+        SetWindowLongPtrW(dialog, DWLP_USER, reinterpret_cast<LONG_PTR>(state));
+        for (const wchar_t* value : {L"EPP + caídas", L"Solo EPP"}) SendDlgItemMessageW(dialog, IDC_ADV_ANALYTICS, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value));
+        for (const wchar_t* value : {L"Auto", L"CUDA", L"CPU"}) SendDlgItemMessageW(dialog, IDC_ADV_COMPUTE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value));
+        for (const int image_size : kAllowedImageSizes) {
+            const std::wstring value = std::to_wstring(image_size);
+            SendDlgItemMessageW(dialog, IDC_ADV_IMAGE_SIZE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value.c_str()));
+        }
+        SendDlgItemMessageW(dialog, IDC_ADV_ANALYTICS, CB_SETCURSEL, state->analytics_mode == AnalyticsMode::PpeOnly ? 1 : 0, 0);
+        SendDlgItemMessageW(dialog, IDC_ADV_COMPUTE, CB_SETCURSEL, state->compute_mode == ComputeMode::Cuda ? 1 : state->compute_mode == ComputeMode::Cpu ? 2 : 0, 0);
+        const auto image = std::ranges::find(kAllowedImageSizes, state->preferences.image_size);
+        SendDlgItemMessageW(dialog, IDC_ADV_IMAGE_SIZE, CB_SETCURSEL, image == kAllowedImageSizes.end() ? 0 : image - kAllowedImageSizes.begin(), 0);
+        return TRUE;
+    }
+    if (message != WM_COMMAND || state == nullptr) return FALSE;
+    if (LOWORD(wparam) == IDCANCEL) { EndDialog(dialog, IDCANCEL); return TRUE; }
+    if (LOWORD(wparam) != IDOK) return FALSE;
+    const auto analytics = SendDlgItemMessageW(dialog, IDC_ADV_ANALYTICS, CB_GETCURSEL, 0, 0);
+    const auto compute = SendDlgItemMessageW(dialog, IDC_ADV_COMPUTE, CB_GETCURSEL, 0, 0);
+    const auto image = SendDlgItemMessageW(dialog, IDC_ADV_IMAGE_SIZE, CB_GETCURSEL, 0, 0);
+    if (analytics == CB_ERR || compute == CB_ERR || image == CB_ERR) return TRUE;
+    state->analytics_mode = analytics == 1 ? AnalyticsMode::PpeOnly : AnalyticsMode::PpeFall;
+    state->compute_mode = compute == 1 ? ComputeMode::Cuda : compute == 2 ? ComputeMode::Cpu : ComputeMode::Auto;
+    state->preferences.image_size = kAllowedImageSizes[static_cast<std::size_t>(image)];
+    saveOperatorPreferencesAtomic(state->preferences_path, state->preferences);
+    EndDialog(dialog, IDOK);
+    return TRUE;
+}
+
+void openPpeProfileDialog(LauncherWindow& state) {
+    if (DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_PPE_PROFILE),
+            state.window, ppeDialogProcedure, reinterpret_cast<LPARAM>(&state)) == -1) {
+        throw std::runtime_error("Could not open PPE profile dialog");
+    }
+}
+
+void openAdvancedSettingsDialog(LauncherWindow& state) {
+    if (DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_ADVANCED_SETTINGS),
+            state.window, advancedDialogProcedure, reinterpret_cast<LPARAM>(&state)) == -1) {
+        throw std::runtime_error("Could not open advanced settings dialog");
+    }
+}
+
+void addCameraProfile(LauncherWindow& state) {
+    CameraConnectionProfile profile;
+    for (int suffix = 1; suffix < 1000; ++suffix) {
+        profile.name = L"CAMARA_" + std::to_wstring(suffix);
+        PCREDENTIALW existing = nullptr;
+        if (!CredReadW(savedCameraCredentialTarget(profile.name).c_str(), CRED_TYPE_GENERIC, 0, &existing)) break;
+        CredFree(existing);
+    }
+    if (!editCameraProfile(state, profile)) return;
+    writeSavedCameraProfile(profile);
+    refreshSavedCameraProfiles(state, profile.name);
+    setStatus(state, (state.spanish ? L"Perfil creado: " : L"Created profile: ") + profile.name);
+}
+
+void editSelectedCameraProfile(LauncherWindow& state) {
+    const auto selected = selectedSavedCameraProfiles(state);
+    if (selected.size() != 1) throw std::invalid_argument("Select exactly one camera profile to edit");
+    const std::wstring original = selected.front();
+    CameraConnectionProfile profile = readSavedCameraProfile(original);
+    if (!editCameraProfile(state, profile)) return;
+    writeSavedCameraProfile(profile);
+    if (profile.name != original) CredDeleteW(savedCameraCredentialTarget(original).c_str(), CRED_TYPE_GENERIC, 0);
+    refreshSavedCameraProfiles(state, profile.name);
+    setStatus(state, (state.spanish ? L"Perfil actualizado: " : L"Updated profile: ") + profile.name);
+}
+
+void selectAllCameraProfiles(LauncherWindow& state) {
+    SendMessageW(state.saved_camera, LB_SETSEL, TRUE, -1);
+    const auto count = SendMessageW(state.saved_camera, LB_GETSELCOUNT, 0, 0);
+    setStatus(state, (state.spanish ? L"Cámaras seleccionadas: " : L"Selected cameras: ") + std::to_wstring(count));
+}
+
 HWND createThresholdCombo(LauncherWindow& state, int id, int x, int y, int width) {
     return createControl(
         state, 0, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWN | CBS_AUTOHSCROLL,
@@ -682,259 +997,98 @@ void createControls(LauncherWindow& state) {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     state.spanish = state.preferences.language == UiLanguage::Spanish;
     state.dark = state.preferences.theme == ThemeMode::Dark;
+    state.preferences.show_window = true;
     applyTheme(state);
-    constexpr int label_x = 16;
-    constexpr int edit_x = 146;
-    constexpr int edit_width = 620;
-    constexpr int row_y = 80;
 
-    state.menu_button = createControl(state, 0, L"BUTTON", L"Menu v", WS_TABSTOP | BS_OWNERDRAW,
+    state.menu_button = createControl(state, 0, L"BUTTON", L"Menú ▾", WS_TABSTOP | BS_OWNERDRAW,
         16, 18, 100, 30, MenuButton);
-    addLocalizedText(state, state.menu_button, L"Menu \u25be", L"Menú \u25be");
+    addLocalizedText(state, state.menu_button, L"Menu ▾", L"Menú ▾");
     const HWND heading = createControl(state, 0, L"STATIC", kProductName, SS_LEFT, 130, 14, 400, 30, 0);
     SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(state.heading_font), TRUE);
-    const HWND subtitle = createControl(
-        state, 0, L"STATIC", L"Camera analytics control center", SS_LEFT, 132, 46, 400, 20, 0);
-    addLocalizedText(state, subtitle, L"Camera analytics control center", L"Centro de control de analítica de cámaras");
-    state.language = createControl(
-        state, 0, L"BUTTON", L"Switch language to Spanish", WS_TABSTOP | BS_OWNERDRAW,
-        810, 18, 34, 30, LanguageButton);
-    state.theme_button = createControl(
-        state, 0, L"BUTTON", L"Switch to dark theme", WS_TABSTOP | BS_OWNERDRAW,
-        852, 18, 34, 30, ThemeButton);
+    const HWND subtitle = createControl(state, 0, L"STATIC", L"Multi-camera analytics control center", SS_LEFT, 132, 46, 500, 20, 0);
+    addLocalizedText(state, subtitle, L"Multi-camera analytics control center", L"Centro de analítica multicámara");
+    state.language = createControl(state, 0, L"BUTTON", L"ES", WS_TABSTOP | BS_OWNERDRAW, 810, 18, 34, 30, LanguageButton);
+    state.theme_button = createControl(state, 0, L"BUTTON", L"◐", WS_TABSTOP | BS_OWNERDRAW, 852, 18, 34, 30, ThemeButton);
     addTooltip(state, state.language, L"Language / Idioma");
     addTooltip(state, state.theme_button, L"Light or dark theme / Tema claro u oscuro");
 
-    addLocalizedText(
-        state, createLabel(state, L"Camera or video file", label_x, row_y, 120),
-        L"Camera or video file", L"Cámara o archivo de video");
-    state.source = createEdit(state, SourceEdit, edit_x, row_y, edit_width);
-    SetWindowTextW(state.source, L"rtsp://");
-    addLocalizedText(state, createBrowseButton(state, SourceBrowse, row_y), L"Browse...", L"Explorar...");
+    const HWND camera_heading = createLabel(state, L"Camera profiles", 16, 82, 280);
+    addLocalizedText(state, camera_heading, L"Camera profiles", L"Perfiles de conexión a cámaras");
+    state.saved_camera = createControl(state, WS_EX_CLIENTEDGE, L"LISTBOX", L"",
+        WS_TABSTOP | WS_VSCROLL | LBS_EXTENDEDSEL | LBS_NOINTEGRALHEIGHT | LBS_NOTIFY,
+        16, 106, 650, 190, SavedCameraCombo);
+    state.add_camera = createControl(state, 0, L"BUTTON", L"New...", WS_TABSTOP | BS_OWNERDRAW,
+        682, 106, 188, 29, AddCameraButton);
+    addLocalizedText(state, state.add_camera, L"New profile...", L"Nuevo perfil...");
+    state.edit_camera = createControl(state, 0, L"BUTTON", L"Edit...", WS_TABSTOP | BS_OWNERDRAW,
+        682, 143, 188, 29, EditCameraButton);
+    addLocalizedText(state, state.edit_camera, L"Edit profile...", L"Editar perfil...");
+    state.delete_camera = createControl(state, 0, L"BUTTON", L"Delete", WS_TABSTOP | BS_OWNERDRAW,
+        682, 180, 188, 29, DeleteCameraButton);
+    addLocalizedText(state, state.delete_camera, L"Delete selected", L"Eliminar selección");
+    state.select_all_camera = createControl(state, 0, L"BUTTON", L"Select all", WS_TABSTOP | BS_OWNERDRAW,
+        682, 217, 188, 29, SelectAllCameraButton);
+    addLocalizedText(state, state.select_all_camera, L"Select all cameras", L"Seleccionar todas");
+    const HWND sharing = createControl(state, 0, L"STATIC",
+        L"Selected cameras share one inference engine; tracking remains isolated per camera.",
+        SS_LEFT, 16, 302, 850, 22, 0);
+    addLocalizedText(state, sharing,
+        L"Selected cameras share one inference engine; tracking remains isolated per camera.",
+        L"Las cámaras seleccionadas comparten un motor de inferencia; el seguimiento se aísla por cámara.");
 
-    addLocalizedText(
-        state, createLabel(state, L"Camera ID", label_x, row_y + 36, 120),
-        L"Camera ID", L"ID de cámara");
-    state.source_label = createEdit(state, SourceLabelEdit, edit_x, row_y + 36, 430);
-    const HWND load_env = createControl(
-        state, 0, L"BUTTON", L"Load .env...", WS_TABSTOP | BS_OWNERDRAW,
-        778, row_y + 36, 92, 25, LoadEnvButton);
-    addLocalizedText(state, load_env, L"Load .env...", L"Cargar .env...");
+    const HWND output_label = createLabel(state, L"Output folder", 16, 336, 120);
+    addLocalizedText(state, output_label, L"Output folder", L"Carpeta de salida");
+    state.output = createEdit(state, OutputEdit, 146, 332, 620);
+    addLocalizedText(state, createBrowseButton(state, OutputBrowse, 332), L"Browse...", L"Explorar...");
 
-    addLocalizedText(
-        state, createLabel(state, L"Saved camera", label_x, row_y + 72, 120),
-        L"Saved camera", L"Cámara guardada");
-    state.saved_camera = createControl(
-        state, 0, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST,
-        edit_x, row_y + 72, 430, 200, SavedCameraCombo);
-    state.save_camera = createControl(
-        state, 0, L"BUTTON", L"Save", WS_TABSTOP | BS_OWNERDRAW,
-        586, row_y + 72, 80, 25, SaveCameraButton);
-    addLocalizedText(state, state.save_camera, L"Save", L"Guardar");
-    state.load_camera = createControl(
-        state, 0, L"BUTTON", L"Load", WS_TABSTOP | BS_OWNERDRAW,
-        674, row_y + 72, 80, 25, LoadCameraButton);
-    addLocalizedText(state, state.load_camera, L"Load", L"Cargar");
-    state.delete_camera = createControl(
-        state, 0, L"BUTTON", L"Delete", WS_TABSTOP | BS_OWNERDRAW,
-        762, row_y + 72, 108, 25, DeleteCameraButton);
-    addLocalizedText(state, state.delete_camera, L"Delete", L"Eliminar");
-
-    addLocalizedText(
-        state, createLabel(state, L"Output folder", label_x, row_y + 108, 120),
-        L"Output folder", L"Carpeta de salida");
-    state.output = createEdit(state, OutputEdit, edit_x, row_y + 108, edit_width);
-    addLocalizedText(state, createBrowseButton(state, OutputBrowse, row_y + 108), L"Browse...", L"Explorar...");
-
-    addLocalizedText(
-        state, createLabel(state, L"Analytics mode", label_x, row_y + 146, 120),
-        L"Analytics mode", L"Modo de análisis");
-    state.analytics = createControl(
-        state, 0, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST,
-        edit_x, row_y + 144, 220, 200, AnalyticsCombo);
-    updateAnalyticsOptions(state);
-
-    addLocalizedText(
-        state, createLabel(state, L"Compute", 410, row_y + 146, 75),
-        L"Compute", L"Cómputo");
-    state.compute = createControl(
-        state, 0, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST,
-        486, row_y + 144, 180, 200, ComputeCombo);
-    SendMessageW(state.compute, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Auto"));
-    SendMessageW(state.compute, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"CUDA"));
-    SendMessageW(state.compute, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"CPU"));
-    SendMessageW(state.compute, CB_SETCURSEL, 0, 0);
-
-    addLocalizedText(
-        state, createLabel(state, L"Inference size", 684, row_y + 146, 92),
-        L"Inference size", L"Tamaño de inferencia");
-    state.image_size = createClosedCombo(state, ImageSizeCombo, 778, row_y + 144, 92);
-    for (const int image_size : kAllowedImageSizes) {
-        const std::wstring value = std::to_wstring(image_size);
-        SendMessageW(state.image_size, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value.c_str()));
-    }
-    const auto image_position = std::ranges::find(kAllowedImageSizes, state.preferences.image_size);
-    SendMessageW(state.image_size, CB_SETCURSEL,
-        image_position == kAllowedImageSizes.end() ? 0 : image_position - kAllowedImageSizes.begin(), 0);
-
-    addLocalizedText(
-        state, createLabel(state, L"RTSP transport", label_x, row_y + 186, 120),
-        L"RTSP transport", L"Transporte RTSP");
-    state.rtsp_transport = createControl(
-        state, 0, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST,
-        edit_x, row_y + 184, 220, 160, RtspTransportCombo);
-    SendMessageW(state.rtsp_transport, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"TCP"));
-    SendMessageW(state.rtsp_transport, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"UDP"));
-    SendMessageW(state.rtsp_transport, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Default"));
-    SendMessageW(state.rtsp_transport, CB_SETCURSEL,
-        state.preferences.rtsp_transport == RtspTransport::Udp ? 1
-            : state.preferences.rtsp_transport == RtspTransport::Default ? 2 : 0,
-        0);
-
-    addLocalizedText(
-        state, createLabel(state, L"Video decoding", 410, row_y + 186, 118),
-        L"Video decoding", L"Decodificación");
-    state.video_acceleration = createControl(
-        state, 0, WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST,
-        530, row_y + 184, 220, 160, VideoAccelerationCombo);
-    SendMessageW(state.video_acceleration, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Auto"));
-    SendMessageW(state.video_acceleration, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"D3D11"));
-    SendMessageW(state.video_acceleration, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"CPU"));
-    SendMessageW(state.video_acceleration, CB_SETCURSEL,
-        state.preferences.video_acceleration == VideoAcceleration::D3d11 ? 1
-            : state.preferences.video_acceleration == VideoAcceleration::Cpu ? 2 : 0,
-        0);
-
-    addLocalizedText(
-        state, createLabel(state, L"Stream resolution", label_x, row_y + 226, 120),
-        L"Stream resolution", L"Resolución de video");
-    state.stream_resolution = createClosedCombo(
-        state, StreamResolutionCombo, edit_x, row_y + 224, 220);
-    for (const std::wstring_view resolution : kStreamResolutions) {
-        const std::wstring value(resolution);
-        SendMessageW(
-            state.stream_resolution, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value.c_str()));
-    }
-    const auto resolution_position = std::ranges::find(
-        kStreamResolutions, std::wstring_view(state.preferences.stream_resolution));
-    SendMessageW(state.stream_resolution, CB_SETCURSEL,
-        resolution_position == kStreamResolutions.end()
-            ? 3 : resolution_position - kStreamResolutions.begin(),
-        0);
-
-    addLocalizedText(
-        state, createLabel(state, L"Stream FPS", 410, row_y + 226, 118),
-        L"Stream FPS", L"FPS de video");
-    state.stream_fps = createClosedCombo(state, StreamFpsCombo, 530, row_y + 224, 120);
-    for (const int fps : kStreamFrameRates) {
-        const std::wstring value = std::to_wstring(fps);
-        SendMessageW(state.stream_fps, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value.c_str()));
-    }
-    const auto fps_position = std::ranges::find(kStreamFrameRates, state.preferences.stream_fps);
-    SendMessageW(state.stream_fps, CB_SETCURSEL,
-        fps_position == kStreamFrameRates.end()
-            ? 5 : fps_position - kStreamFrameRates.begin(),
-        0);
-
-    const HWND threshold_heading = createLabel(
-        state, L"PPE class confidence (0.00-1.00)", label_x, row_y + 264, 320);
-    addLocalizedText(
-        state, threshold_heading,
-        L"PPE class confidence (0.00-1.00)", L"Confianza por clase EPP (0.00-1.00)");
-    constexpr std::array<int, 8> threshold_x{146, 146, 146, 146, 620, 620, 620, 620};
-    constexpr std::array<int, 8> label_positions{16, 16, 16, 16, 440, 440, 440, 440};
-    constexpr std::array<std::size_t, cuajone::kPpeItemCount> item_class_ids{0, 2, 3, 4, 5, 6, 7};
-    for (std::size_t index = 0; index < kPpeOutputLabels.size(); ++index) {
-        const int row = static_cast<int>(index % 4);
-        const int y = row_y + 294 + row * 34;
-        const int text_length = MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, kPpeOutputLabels[index].data(),
-            static_cast<int>(kPpeOutputLabels[index].size()), nullptr, 0);
-        std::wstring label(static_cast<std::size_t>(text_length), L'\0');
-        MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, kPpeOutputLabels[index].data(),
-            static_cast<int>(kPpeOutputLabels[index].size()), label.data(), text_length);
-        createLabel(state, label.c_str(), label_positions[index], y, 190);
-        state.ppe_thresholds[index] = createThresholdCombo(
-            state, PpeThresholdBase + static_cast<int>(index), threshold_x[index], y, 100);
-        populateThresholdCombo(
-            state.ppe_thresholds[index], state.preferences.ppe_class_confidences[index]);
-        if (!SetWindowSubclass(
-                state.ppe_thresholds[index], thresholdWheelProcedure,
-                static_cast<UINT_PTR>(PpeThresholdBase + static_cast<int>(index)),
-                reinterpret_cast<DWORD_PTR>(&state))) {
-            throw std::runtime_error("Could not handle PPE threshold mouse-wheel input");
-        }
-        const HWND edit = GetWindow(state.ppe_thresholds[index], GW_CHILD);
-        if (edit == nullptr || !SetWindowSubclass(
-                edit, thresholdWheelProcedure,
-                static_cast<UINT_PTR>(PpeThresholdBase + static_cast<int>(index)),
-                reinterpret_cast<DWORD_PTR>(&state))) {
-            throw std::runtime_error("Could not handle PPE threshold text input");
-        }
-        const auto item = std::ranges::find(item_class_ids, index);
-        if (item != item_class_ids.end()) {
-            const std::size_t item_index = static_cast<std::size_t>(item - item_class_ids.begin());
-            state.ppe_enabled[item_index] = createControl(
-                state, 0, L"BUTTON", label.c_str(), WS_TABSTOP | BS_AUTOCHECKBOX,
-                threshold_x[index] + 100, y, index < 4 ? 180 : 150, 22,
-                PpeEnabledBase + static_cast<int>(item_index));
-            SendMessageW(state.ppe_enabled[item_index], BM_SETCHECK,
-                state.preferences.ppe_enabled[item_index] ? BST_CHECKED : BST_UNCHECKED, 0);
-        }
-    }
-
-    state.show = createControl(
-        state, 0, L"BUTTON", L"Show annotated video window",
-        WS_TABSTOP | BS_AUTOCHECKBOX, edit_x, row_y + 438, 340, 24, ShowCheck);
-    SendMessageW(
-        state.show, BM_SETCHECK,
-        state.preferences.show_window ? BST_CHECKED : BST_UNCHECKED, 0);
-    addLocalizedText(
-        state, state.show, L"Show annotated video window", L"Mostrar ventana de video anotada");
-
-    state.validate = createControl(
-        state, 0, L"BUTTON", L"Validate", WS_TABSTOP | BS_OWNERDRAW,
-        edit_x, row_y + 476, 110, 32, ValidateButton);
+    // PPE profile, advanced settings and .env import live only in the Menu popup
+    // (see showLauncherMenu); the main layout keeps Validate/Start/Stop here.
+    state.validate = createControl(state, 0, L"BUTTON", L"Validate", WS_TABSTOP | BS_OWNERDRAW,
+        146, 374, 110, 32, ValidateButton);
     addLocalizedText(state, state.validate, L"Validate", L"Validar");
-    state.start = createControl(
-        state, 0, L"BUTTON", L"Start", WS_TABSTOP | BS_OWNERDRAW,
-        270, row_y + 476, 110, 32, StartButton);
+    state.start = createControl(state, 0, L"BUTTON", L"Start", WS_TABSTOP | BS_OWNERDRAW,
+        270, 374, 110, 32, StartButton);
     addLocalizedText(state, state.start, L"Start", L"Iniciar");
-    state.stop = createControl(
-        state, 0, L"BUTTON", L"Stop", WS_TABSTOP | BS_OWNERDRAW,
-        394, row_y + 476, 110, 32, StopButton);
+    state.stop = createControl(state, 0, L"BUTTON", L"Stop", WS_TABSTOP | BS_OWNERDRAW,
+        394, 374, 110, 32, StopButton);
     addLocalizedText(state, state.stop, L"Stop", L"Detener");
     EnableWindow(state.stop, FALSE);
 
-    addLocalizedText(
-        state, createLabel(state, L"Status", label_x, row_y + 528, 120),
-        L"Status", L"Estado");
-    state.status = createControl(
-        state, WS_EX_CLIENTEDGE, L"STATIC", L"Ready", SS_LEFT | SS_CENTERIMAGE,
-        edit_x, row_y + 524, 724, 32, StatusText);
-    addLocalizedText(
-        state, createLabel(state, L"Log path", label_x, row_y + 572, 120),
-        L"Log path", L"Ruta del log");
-    state.log_path = createEdit(state, LogPathEdit, edit_x, row_y + 568, 620, true);
-    const HWND open_log = createControl(
-        state, 0, L"BUTTON", L"Open log", WS_TABSTOP | BS_OWNERDRAW,
-        778, row_y + 568, 92, 25, OpenLogButton);
+    const HWND status_label = createLabel(state, L"Status", 16, 422, 120);
+    addLocalizedText(state, status_label, L"Status", L"Estado");
+    state.status = createControl(state, WS_EX_CLIENTEDGE, L"STATIC", L"Ready", SS_LEFT | SS_CENTERIMAGE,
+        146, 418, 724, 32, StatusText);
+    const HWND log_label = createLabel(state, L"Log path", 16, 462, 120);
+    addLocalizedText(state, log_label, L"Log path", L"Ruta del log");
+    state.log_path = createEdit(state, LogPathEdit, 146, 458, 620, true);
+    const HWND open_log = createControl(state, 0, L"BUTTON", L"Open log", WS_TABSTOP | BS_OWNERDRAW,
+        778, 458, 92, 25, OpenLogButton);
     addLocalizedText(state, open_log, L"Open log", L"Abrir log");
 
     state.program_data = knownProgramData();
     state.managed_model_root = preferredModelRoot();
+    // Dev-layout fallback: a freshly built launcher runs next to the build
+    // tree where <exe>/models does not exist. Adopt the first candidate root
+    // holding a complete strict bundle (for example the staged installer
+    // bundle) so Validate/Start work without an MSI install. The installed
+    // layout keeps the preferred root, which is always tried first.
+    if (const auto best = resolveBestManagedModelSet(
+            managedModelRootCandidates(state.managed_model_root), true)) {
+        state.managed_model_root = best->root;
+    }
     setText(state.output, state.program_data / L"output");
-    SetWindowTextW(state.source_label, L"CAM_CUAJONE_01");
     setText(state.log_path, state.program_data / L"logs");
     refreshSavedCameraProfiles(state);
-
+    if (SendMessageW(state.saved_camera, LB_GETCOUNT, 0, 0) == 0) {
+        CameraConnectionProfile default_profile;
+        default_profile.name = L"CAMARA_AXIS_01";
+        writeSavedCameraProfile(default_profile);
+        refreshSavedCameraProfiles(state, default_profile.name);
+    }
     if (!resolveManagedModelSet(state.managed_model_root, true).onnx_complete) {
-        setStatus(
-            state,
-            state.spanish
-                ? L"El conjunto obligatorio de modelos administrados está incompleto en la carpeta de la aplicación."
-                : L"The mandatory managed model set is incomplete at the application models folder.");
+        setStatus(state, state.spanish
+            ? L"El conjunto obligatorio de modelos está incompleto."
+            : L"The mandatory managed model set is incomplete.");
     }
     refreshLanguage(state);
 }
@@ -975,42 +1129,39 @@ void loadEnv(LauncherWindow& state) {
     if (env_path.empty()) return;
 
     const auto values = readEnvFile(env_path);
-    const auto applyText = [&](std::wstring_view key, HWND control) {
-        if (const auto value = envValue(values, key)) SetWindowTextW(control, value->c_str());
-    };
-    applyText(L"RTSP_URL", state.source);
-    applyText(L"CAMERA_ID", state.source_label);
+    std::optional<CameraConnectionProfile> imported_camera;
+    if (const auto source = envValue(values, L"RTSP_URL")) {
+        const std::wstring name = envValue(values, L"CAMERA_ID").value_or(L"CAMARA_IMPORTADA");
+        imported_camera = parseLegacyCameraUrl(*source, name);
+    }
     if (const auto output = envValue(values, L"OUTPUT_DIR")) {
         setText(state.output, resolveEnvPath(env_path, *output));
     }
     if (const auto mode = envValue(values, L"ANALYTICS_MODE")) {
-        SendMessageW(state.analytics, CB_SETCURSEL, *mode == L"ppe-only" ? 0 : 1, 0);
-    }
-    if (const auto show = envValue(values, L"SHOW_WINDOW")) {
-        SendMessageW(state.show, BM_SETCHECK,
-            (*show == L"1" || upper(*show) == L"TRUE") ? BST_CHECKED : BST_UNCHECKED, 0);
+        state.analytics_mode = *mode == L"ppe-only" ? AnalyticsMode::PpeOnly : AnalyticsMode::PpeFall;
     }
     if (const auto transport = envValue(values, L"RTSP_TRANSPORT")) {
         const std::wstring mode = upper(*transport);
-        if (mode == L"TCP") SendMessageW(state.rtsp_transport, CB_SETCURSEL, 0, 0);
-        else if (mode == L"UDP") SendMessageW(state.rtsp_transport, CB_SETCURSEL, 1, 0);
-        else if (mode == L"DEFAULT") SendMessageW(state.rtsp_transport, CB_SETCURSEL, 2, 0);
-        else throw std::invalid_argument("RTSP_TRANSPORT must be tcp, udp, or default");
+        if (mode != L"TCP" && mode != L"UDP" && mode != L"DEFAULT") {
+            throw std::invalid_argument("RTSP_TRANSPORT must be tcp, udp, or default");
+        }
+        if (imported_camera) imported_camera->transport = mode == L"UDP" ? RtspTransport::Udp
+            : mode == L"DEFAULT" ? RtspTransport::Default : RtspTransport::Tcp;
     }
     if (const auto acceleration = envValue(values, L"VIDEO_ACCELERATION")) {
         const std::wstring mode = upper(*acceleration);
-        if (mode == L"AUTO") SendMessageW(state.video_acceleration, CB_SETCURSEL, 0, 0);
-        else if (mode == L"D3D11") SendMessageW(state.video_acceleration, CB_SETCURSEL, 1, 0);
-        else if (mode == L"CPU") SendMessageW(state.video_acceleration, CB_SETCURSEL, 2, 0);
-        else throw std::invalid_argument("VIDEO_ACCELERATION must be auto, d3d11, or cpu");
+        if (mode != L"AUTO" && mode != L"D3D11" && mode != L"CPU") {
+            throw std::invalid_argument("VIDEO_ACCELERATION must be auto, d3d11, or cpu");
+        }
+        if (imported_camera) imported_camera->video_acceleration = mode == L"D3D11" ? VideoAcceleration::D3d11
+            : mode == L"CPU" ? VideoAcceleration::Cpu : VideoAcceleration::Auto;
     }
     if (const auto resolution = envValue(values, L"RTSP_RESOLUTION")) {
         const auto found = std::ranges::find(kStreamResolutions, std::wstring_view(*resolution));
         if (found == kStreamResolutions.end()) {
             throw std::invalid_argument("RTSP_RESOLUTION is not supported by the launcher");
         }
-        SendMessageW(
-            state.stream_resolution, CB_SETCURSEL, found - kStreamResolutions.begin(), 0);
+        if (imported_camera) imported_camera->resolution = *resolution;
     }
     if (const auto fps = envValue(values, L"RTSP_FPS")) {
         wchar_t* end = nullptr;
@@ -1019,7 +1170,7 @@ void loadEnv(LauncherWindow& state) {
         if (end != fps->c_str() + fps->size() || found == kStreamFrameRates.end()) {
             throw std::invalid_argument("RTSP_FPS must be 5, 10, 15, 20, 25, or 30");
         }
-        SendMessageW(state.stream_fps, CB_SETCURSEL, found - kStreamFrameRates.begin(), 0);
+        if (imported_camera) imported_camera->fps = static_cast<int>(parsed);
     }
     if (const auto confidence = envValue(values, L"PPE_CONF")) {
         int selection{};
@@ -1028,9 +1179,7 @@ void loadEnv(LauncherWindow& state) {
         } catch (const std::invalid_argument&) {
             throw std::invalid_argument("PPE_CONF must be a decimal from 0.00 to 1.00");
         }
-        for (HWND threshold : state.ppe_thresholds) {
-            setThresholdComboValue(threshold, selection);
-        }
+        state.preferences.ppe_class_confidences.fill(static_cast<float>(selection) / 100.0F);
     }
     const auto ppe_imgsz = envValue(values, L"PPE_IMGSZ");
     const auto pose_imgsz = envValue(values, L"POSE_IMGSZ");
@@ -1045,7 +1194,7 @@ void loadEnv(LauncherWindow& state) {
         if (end != configured.c_str() + configured.size() || found == kAllowedImageSizes.end()) {
             throw std::invalid_argument("PPE_IMGSZ/POSE_IMGSZ must be 640, 768, 960, or 1280");
         }
-        SendMessageW(state.image_size, CB_SETCURSEL, found - kAllowedImageSizes.begin(), 0);
+        state.preferences.image_size = static_cast<int>(parsed);
     }
 
     std::vector<std::wstring> ignored;
@@ -1088,6 +1237,10 @@ void loadEnv(LauncherWindow& state) {
              L"EXCEL_EXPORT_EVERY_EVENTS",
              L"PPE_MODEL_PATH", L"POSE_MODEL_PATH", L"RTSP_SOCKET_TIMEOUT_S"}) {
         if (envValue(values, key)) ignored.emplace_back(key);
+    }
+    if (imported_camera) {
+        writeSavedCameraProfile(*imported_camera);
+        refreshSavedCameraProfiles(state, imported_camera->name);
     }
     if (ignored.empty()) {
         setStatus(state, state.spanish ? L"Configuración .env cargada" : L"Loaded .env settings");
@@ -1163,69 +1316,31 @@ LauncherSettings readSettings(const LauncherWindow& state) {
     LauncherSettings settings;
     settings.performance_report = state.performance_report;
     settings.telemetry_interval_seconds = state.telemetry_interval_seconds;
-    settings.source = editText(state.source);
     settings.output = editText(state.output);
-    settings.analytics_mode = SendMessageW(state.analytics, CB_GETCURSEL, 0, 0) == 0
-        ? AnalyticsMode::PpeOnly : AnalyticsMode::PpeFall;
-    const LRESULT compute = SendMessageW(state.compute, CB_GETCURSEL, 0, 0);
-    settings.compute_mode = compute == 1
-        ? ComputeMode::Cuda : (compute == 2 ? ComputeMode::Cpu : ComputeMode::Auto);
-    const LRESULT transport = SendMessageW(state.rtsp_transport, CB_GETCURSEL, 0, 0);
-    settings.rtsp_transport = transport == 1
-        ? RtspTransport::Udp : (transport == 2 ? RtspTransport::Default : RtspTransport::Tcp);
-    const LRESULT acceleration = SendMessageW(state.video_acceleration, CB_GETCURSEL, 0, 0);
-    settings.video_acceleration = acceleration == 1
-        ? VideoAcceleration::D3d11
-        : (acceleration == 2 ? VideoAcceleration::Cpu : VideoAcceleration::Auto);
-    const LRESULT resolution = SendMessageW(state.stream_resolution, CB_GETCURSEL, 0, 0);
-    if (resolution == CB_ERR
-        || static_cast<std::size_t>(resolution) >= kStreamResolutions.size()) {
-        throw std::invalid_argument("Select a supported stream resolution");
-    }
-    settings.stream_resolution = kStreamResolutions[static_cast<std::size_t>(resolution)];
-    const LRESULT fps = SendMessageW(state.stream_fps, CB_GETCURSEL, 0, 0);
-    if (fps == CB_ERR || static_cast<std::size_t>(fps) >= kStreamFrameRates.size()) {
-        throw std::invalid_argument("Select a supported stream frame rate");
-    }
-    settings.stream_fps = kStreamFrameRates[static_cast<std::size_t>(fps)];
+    settings.analytics_mode = state.analytics_mode;
+    settings.compute_mode = state.compute_mode;
     settings.managed_model_root = state.managed_model_root;
-    settings.source_label = editText(state.source_label);
+    // Lets Validate/Start search ordered dev candidate roots when the stored
+    // root has no complete set. The installed bundle path stays strict.
+    settings.allow_dev_model_fallback = true;
+    const auto selected = selectedSavedCameraProfiles(state);
+    for (const auto& name : selected) {
+        const auto profile = readSavedCameraProfile(name);
+        settings.cameras.push_back({
+            buildAxisRtspUrl(profile), profile.name, profile.transport, profile.video_acceleration});
+    }
     settings.runtime_options = state.runtime_options;
-    const LRESULT image_selection = SendMessageW(state.image_size, CB_GETCURSEL, 0, 0);
-    if (image_selection == CB_ERR
-        || static_cast<std::size_t>(image_selection) >= kAllowedImageSizes.size()) {
-        throw std::invalid_argument("Select a supported inference size");
-    }
-    settings.image_size = kAllowedImageSizes[static_cast<std::size_t>(image_selection)];
-    for (std::size_t index = 0; index < settings.ppe_class_confidences.size(); ++index) {
-        settings.ppe_class_confidences[index] = parsePpeConfidenceThreshold(
-            editText(state.ppe_thresholds[index]));
-    }
-    for (std::size_t index = 0; index < settings.ppe_enabled.size(); ++index) {
-        settings.ppe_enabled[index] = SendMessageW(
-            state.ppe_enabled[index], BM_GETCHECK, 0, 0) == BST_CHECKED;
-    }
-    settings.show_window = SendMessageW(state.show, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    settings.image_size = state.preferences.image_size;
+    settings.ppe_class_confidences = state.preferences.ppe_class_confidences;
+    settings.ppe_enabled = state.preferences.ppe_enabled;
+    settings.show_window = true;
     return settings;
 }
 
 void persistPreferences(LauncherWindow& state) {
-    const LauncherSettings current = readSettings(state);
     state.preferences.language = state.spanish ? UiLanguage::Spanish : UiLanguage::English;
     state.preferences.theme = state.dark ? ThemeMode::Dark : ThemeMode::Light;
-    state.preferences.image_size = current.image_size;
-    state.preferences.ppe_class_confidences = current.ppe_class_confidences;
-    state.preferences.ppe_enabled = current.ppe_enabled;
-    state.preferences.show_window = current.show_window;
-    state.preferences.rtsp_transport = current.rtsp_transport;
-    state.preferences.video_acceleration = current.video_acceleration;
-    state.preferences.stream_resolution = current.stream_resolution;
-    state.preferences.stream_fps = current.stream_fps;
-    for (std::size_t index = 0; index < current.ppe_class_confidences.size(); ++index) {
-        setThresholdComboValue(
-            state.ppe_thresholds[index],
-            static_cast<int>(std::lround(current.ppe_class_confidences[index] * 100.0F)));
-    }
+    state.preferences.show_window = true;
     saveOperatorPreferencesAtomic(state.preferences_path, state.preferences);
 }
 
@@ -1238,6 +1353,67 @@ std::filesystem::path siblingRuntime() {
     }
     module_path.resize(length);
     return std::filesystem::path(module_path).parent_path() / kRuntimeExecutable;
+}
+
+// Double-click support without activate-native.ps1: dev build output lives at
+// <repo>/.tools/native/build/presets/<preset>/ while third-party DLLs live in
+// <repo>/.tools/native/{opencv/.../bin, onnxruntime-*/lib, cuda-runtime/...}.
+// An Explorer launch inherits the plain system PATH, so the runtime child
+// would fail with "opencv_world4120.dll was not found". Resolve those roots
+// relative to this executable and prepend the ones that exist to this process
+// PATH; the CreateProcessW child in launchRuntime() inherits it. Installed
+// (MSI) layouts have no .tools tree, so every candidate is skipped and PATH is
+// left untouched — the MSI relies solely on its app-local bin\ closure.
+void prependDevNativeDllRoots() {
+    std::wstring module_path(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(
+        nullptr, module_path.data(), static_cast<DWORD>(module_path.size()));
+    if (length == 0 || length == static_cast<DWORD>(module_path.size())) return;
+    module_path.resize(length);
+    std::filesystem::path repo_root =
+        std::filesystem::path(module_path).parent_path();
+    // <preset> -> presets -> build -> native -> .tools -> <repo>.
+    for (int level = 0; level < 5; ++level) {
+        if (!repo_root.has_parent_path()) return;
+        repo_root = repo_root.parent_path();
+    }
+    std::error_code marker_error;
+    const std::filesystem::path native_root = repo_root / L".tools" / L"native";
+    if (!std::filesystem::is_directory(native_root, marker_error) || marker_error) {
+        return;  // Installed layout: keep the MSI app-local closure untouched.
+    }
+    const std::vector<std::filesystem::path> candidates{
+        native_root / L"opencv" / L"opencv" / L"build" / L"x64" / L"vc16" / L"bin",
+        native_root / L"onnxruntime-win-x64-1.25.0" / L"lib",
+        native_root / L"onnxruntime-win-x64-gpu-1.25.0" / L"lib",
+        native_root / L"cuda-runtime" / L"nvidia" / L"cuda_runtime" / L"bin",
+        native_root / L"nvidia-libraries" / L"cublas" / L"nvidia" / L"cublas" / L"bin",
+        native_root / L"nvidia-libraries" / L"cudnn" / L"nvidia" / L"cudnn" / L"bin",
+        native_root / L"nvidia-libraries" / L"cufft" / L"nvidia" / L"cufft" / L"bin",
+    };
+    std::wstring current(32768, L'\0');
+    const DWORD current_length = GetEnvironmentVariableW(
+        L"PATH", current.data(), static_cast<DWORD>(current.size()));
+    if (current_length >= current.size()) return;  // PATH unexpectedly huge; leave it.
+    current.resize(current_length);
+    std::wstring current_lower = current;
+    std::transform(current_lower.begin(), current_lower.end(), current_lower.begin(), ::towlower);
+    std::wstring prefix;
+    for (const auto& candidate : candidates) {
+        std::error_code candidate_error;
+        if (!std::filesystem::is_directory(candidate, candidate_error) || candidate_error) {
+            continue;
+        }
+        std::wstring entry = candidate.wstring();
+        std::wstring entry_lower = entry;
+        std::transform(entry_lower.begin(), entry_lower.end(), entry_lower.begin(), ::towlower);
+        if (current_lower.find(entry_lower) != std::wstring::npos) continue;
+        if (!prefix.empty()) prefix.push_back(L';');
+        prefix += entry;
+    }
+    if (prefix.empty()) return;
+    const std::wstring updated = prefix + (current.empty() ? L"" : L";" + current);
+    SetEnvironmentVariableW(L"PATH", updated.c_str());
 }
 
 std::filesystem::path nextLogPath(const LauncherWindow& state) {
@@ -1255,6 +1431,11 @@ void setRunning(LauncherWindow& state, bool running) {
     EnableWindow(state.validate, !running);
     EnableWindow(state.start, !running);
     EnableWindow(state.stop, running);
+    EnableWindow(state.saved_camera, !running);
+    EnableWindow(state.add_camera, !running);
+    EnableWindow(state.edit_camera, !running);
+    EnableWindow(state.delete_camera, !running);
+    EnableWindow(state.select_all_camera, !running);
 }
 
 void closeProcessHandles(LauncherWindow& state) {
@@ -1354,6 +1535,9 @@ void launchRuntime(LauncherWindow& state, bool preflight) {
     startup.hStdError = pipe_write;
     PROCESS_INFORMATION process{};
     const std::wstring working_directory = runtime.parent_path().wstring();
+    // NOTE: the child inherits this process environment, including the dev
+    // .tools DLL roots prepended by prependDevNativeDllRoots() (MSI installs
+    // rely on the app-local bin\ closure instead). Keep lpEnvironment nullptr.
     const BOOL created = CreateProcessW(
         runtime.c_str(), command_line.data(), nullptr, nullptr, TRUE,
         CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP,
@@ -1495,8 +1679,7 @@ void finishProcess(LauncherWindow& state, DWORD exit_code, bool preflight) {
 }
 
 void showError(LauncherWindow& state, const std::exception& error) {
-    const std::string narrow(error.what());
-    const std::wstring message(narrow.begin(), narrow.end());
+    const std::wstring message = errorMessageWide(error);
     setStatus(state, state.spanish ? L"Error de configuración" : L"Configuration error");
     MessageBoxW(state.window, message.c_str(), kProductName, MB_OK | MB_ICONERROR);
 }
@@ -1609,9 +1792,17 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wparam, LPARA
                 }
                 else if (id == StartButton) launchRuntime(*state, false);
                 else if (id == StopButton) requestStop(*state);
-                else if (id == SaveCameraButton) saveSavedCameraProfile(*state);
-                else if (id == LoadCameraButton) loadSavedCameraProfile(*state);
+                else if (id == AddCameraButton) addCameraProfile(*state);
+                else if (id == EditCameraButton
+                    || (id == SavedCameraCombo && HIWORD(wparam) == LBN_DBLCLK)) editSelectedCameraProfile(*state);
                 else if (id == DeleteCameraButton) deleteSavedCameraProfile(*state);
+                else if (id == SelectAllCameraButton) selectAllCameraProfiles(*state);
+                else if (id == IDM_PPE_PROFILE) {
+                    openPpeProfileDialog(*state);
+                }
+                else if (id == IDM_ADVANCED_SETTINGS) {
+                    openAdvancedSettingsDialog(*state);
+                }
                 else if (id == LanguageButton) {
                     state->spanish = !state->spanish;
                     refreshLanguage(*state);
@@ -1623,7 +1814,7 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wparam, LPARA
                     refreshLanguage(*state);
                     persistPreferences(*state);
                 }
-                else if (id == LoadEnvButton) loadEnv(*state);
+                else if (id == IDM_LOAD_ENV) loadEnv(*state);
                 else if (id == SourceBrowse || id == OutputBrowse) {
                     browseInto(*state, id);
                 }
@@ -1682,6 +1873,10 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wparam, LPARA
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
+    // Repair PATH before anything else so both this process and the runtime
+    // child resolve dev-tree DLLs on plain Explorer double-click (no-op for
+    // MSI installs; see prependDevNativeDllRoots).
+    prependDevNativeDllRoots();
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(com)) {
         MessageBoxW(nullptr, L"COM initialization failed", kProductName, MB_OK | MB_ICONERROR);
@@ -1722,7 +1917,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     HWND window = CreateWindowExW(
         0, kWindowClass, kProductName,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 906, 730,
+        CW_USEDEFAULT, CW_USEDEFAULT, 906, 543,
         nullptr, nullptr, instance, &state);
     if (window == nullptr) {
         MessageBoxW(nullptr, L"Launcher window creation failed", kProductName, MB_OK | MB_ICONERROR);

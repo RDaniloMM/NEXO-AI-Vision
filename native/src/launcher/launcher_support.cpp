@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cwctype>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <sstream>
 #include <windows.h>
@@ -19,6 +20,10 @@ namespace cuajone::launcher {
 namespace {
 
 constexpr wchar_t kSavedCameraCredentialTargetPrefix[] = L"NexoAI Vision/RTSP/";
+
+std::string utf8FromWide(std::wstring_view value);
+bool equalsAsciiCaseInsensitive(std::wstring_view left, std::wstring_view right);
+void validateStreamSettings(std::wstring_view resolution, int fps);
 
 bool regularFile(const std::filesystem::path& path) {
     std::error_code error;
@@ -100,6 +105,236 @@ void validateRtspCameraUrl(std::wstring_view source) {
     if (host_and_port.empty()) {
         throw std::invalid_argument("RTSP camera URL must include a host");
     }
+}
+
+namespace {
+
+std::string percentEncodeUtf8(std::wstring_view value) {
+    const std::string utf8 = utf8FromWide(value);
+    std::ostringstream output;
+    output << std::uppercase << std::hex;
+    for (const unsigned char character : utf8) {
+        if ((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z')
+            || (character >= '0' && character <= '9') || character == '-' || character == '_'
+            || character == '.' || character == '~') {
+            output << static_cast<char>(character);
+        } else {
+            output << '%' << std::setw(2) << std::setfill('0') << static_cast<unsigned int>(character);
+        }
+    }
+    return output.str();
+}
+
+int hexDigit(char character) {
+    if (character >= '0' && character <= '9') return character - '0';
+    if (character >= 'A' && character <= 'F') return character - 'A' + 10;
+    if (character >= 'a' && character <= 'f') return character - 'a' + 10;
+    return -1;
+}
+
+std::wstring percentDecodeUtf8(std::string_view value) {
+    std::string decoded;
+    decoded.reserve(value.size());
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        if (value[index] != '%') {
+            decoded.push_back(value[index]);
+            continue;
+        }
+        if (index + 2 >= value.size()) throw std::invalid_argument("Invalid percent-encoded profile field");
+        const int high = hexDigit(value[index + 1]);
+        const int low = hexDigit(value[index + 2]);
+        if (high < 0 || low < 0) throw std::invalid_argument("Invalid percent-encoded profile field");
+        decoded.push_back(static_cast<char>((high << 4) | low));
+        index += 2;
+    }
+    return wideFromUtf8(decoded);
+}
+
+int parseProfileInteger(std::string_view value, std::string_view name, int minimum, int maximum) {
+    int parsed{};
+    const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+    if (result.ec != std::errc{} || result.ptr != value.data() + value.size()
+        || parsed < minimum || parsed > maximum) {
+        throw std::invalid_argument("Invalid camera profile field: " + std::string(name));
+    }
+    return parsed;
+}
+
+std::wstring queryValue(std::wstring_view url, std::wstring_view name) {
+    const auto query_start = url.find(L'?');
+    if (query_start == std::wstring_view::npos) return {};
+    std::size_t start = query_start + 1;
+    while (start <= url.size()) {
+        const auto end = url.find(L'&', start);
+        const auto entry = url.substr(start, end == std::wstring_view::npos ? url.size() - start : end - start);
+        const auto separator = entry.find(L'=');
+        if (equalsAsciiCaseInsensitive(entry.substr(0, separator), name)) {
+            return separator == std::wstring_view::npos ? std::wstring{} : std::wstring(entry.substr(separator + 1));
+        }
+        if (end == std::wstring_view::npos) break;
+        start = end + 1;
+    }
+    return {};
+}
+
+}  // namespace
+
+void validateCameraConnectionProfile(const CameraConnectionProfile& profile) {
+    if (!isValidSavedCameraProfileName(profile.name)) {
+        throw std::invalid_argument("Camera profile name is invalid");
+    }
+    if (profile.host.empty() || profile.host.find_first_of(L"/?#@ \t\r\n") != std::wstring::npos) {
+        throw std::invalid_argument("Camera host is invalid");
+    }
+    if (profile.port == 0) throw std::invalid_argument("Camera port must be in [1, 65535]");
+    if (profile.path.empty() || profile.path.front() != L'/' || profile.path.find_first_of(L"?#\r\n") != std::wstring::npos) {
+        throw std::invalid_argument("Camera RTSP path must start with / and cannot contain a query");
+    }
+    validateStreamSettings(profile.resolution, profile.fps);
+    if (profile.compression < 0 || profile.compression > 100
+        || profile.maximum_bitrate_kbps < 1 || profile.maximum_bitrate_kbps > 1000000
+        || profile.zipstream_strength < 0 || profile.zipstream_strength > 30
+        || profile.keyframe_interval < 1 || profile.keyframe_interval > 1000) {
+        throw std::invalid_argument("Camera encoding values are outside supported ranges");
+    }
+    if (profile.bitrate_mode != L"mbr" || profile.bitrate_priority != L"quality"
+        || profile.gop_mode != L"fixed") {
+        throw std::invalid_argument("Only the validated AXIS MBR/quality/fixed profile is supported");
+    }
+}
+
+std::wstring buildAxisRtspUrl(const CameraConnectionProfile& profile) {
+    validateCameraConnectionProfile(profile);
+    std::wstring result = L"rtsp://";
+    if (!profile.username.empty() || !profile.password.empty()) {
+        result += wideFromUtf8(percentEncodeUtf8(profile.username));
+        result += L":";
+        result += wideFromUtf8(percentEncodeUtf8(profile.password));
+        result += L"@";
+    }
+    result += profile.host + L":" + std::to_wstring(profile.port) + profile.path;
+    result += L"?videocodec=h264&h264profile=high&resolution=" + profile.resolution;
+    result += L"&fps=" + std::to_wstring(profile.fps);
+    result += L"&audio=" + std::wstring(profile.audio ? L"1" : L"0");
+    result += L"&compression=" + std::to_wstring(profile.compression);
+    result += L"&videobitratemode=mbr&videomaxbitrate=" + std::to_wstring(profile.maximum_bitrate_kbps);
+    result += L"&videobitratepriority=quality&videozstrength=" + std::to_wstring(profile.zipstream_strength);
+    result += L"&videozgopmode=fixed&videozfpsmode=" + std::wstring(profile.dynamic_fps ? L"dynamic" : L"fixed");
+    result += L"&videokeyframeinterval=" + std::to_wstring(profile.keyframe_interval);
+    return result;
+}
+
+std::string serializeCameraConnectionProfile(const CameraConnectionProfile& profile) {
+    validateCameraConnectionProfile(profile);
+    const auto transport = profile.transport == RtspTransport::Udp ? "udp"
+        : profile.transport == RtspTransport::Default ? "default" : "tcp";
+    const auto acceleration = profile.video_acceleration == VideoAcceleration::D3d11 ? "d3d11"
+        : profile.video_acceleration == VideoAcceleration::Cpu ? "cpu" : "auto";
+    std::ostringstream output;
+    output << "schema_version=1\n"
+           << "username=" << percentEncodeUtf8(profile.username) << '\n'
+           << "password=" << percentEncodeUtf8(profile.password) << '\n'
+           << "host=" << percentEncodeUtf8(profile.host) << '\n'
+           << "port=" << profile.port << '\n'
+           << "path=" << percentEncodeUtf8(profile.path) << '\n'
+           << "resolution=" << percentEncodeUtf8(profile.resolution) << '\n'
+           << "fps=" << profile.fps << '\n'
+           << "compression=" << profile.compression << '\n'
+           << "maximum_bitrate_kbps=" << profile.maximum_bitrate_kbps << '\n'
+           << "zipstream_strength=" << profile.zipstream_strength << '\n'
+           << "keyframe_interval=" << profile.keyframe_interval << '\n'
+           << "dynamic_fps=" << (profile.dynamic_fps ? 1 : 0) << '\n'
+           << "audio=" << (profile.audio ? 1 : 0) << '\n'
+           << "transport=" << transport << '\n'
+           << "video_acceleration=" << acceleration << '\n';
+    return output.str();
+}
+
+CameraConnectionProfile parseCameraConnectionProfile(std::string_view payload, std::wstring_view profile_name) {
+    std::map<std::string, std::string> values;
+    std::istringstream input{std::string(payload)};
+    std::string line;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        const auto separator = line.find('=');
+        if (separator == std::string::npos || separator == 0
+            || !values.emplace(line.substr(0, separator), line.substr(separator + 1)).second) {
+            throw std::invalid_argument("Camera profile contains an invalid or duplicate field");
+        }
+    }
+    if (values["schema_version"] != "1") throw std::invalid_argument("Unsupported camera profile schema");
+    CameraConnectionProfile profile;
+    if (!profile_name.empty()) profile.name = std::wstring(profile_name);
+    for (const char* required : {"username", "password", "host", "port", "path", "resolution", "fps",
+             "compression", "maximum_bitrate_kbps", "zipstream_strength", "keyframe_interval",
+             "dynamic_fps", "audio", "transport", "video_acceleration"}) {
+        if (!values.contains(required)) throw std::invalid_argument("Camera profile is missing fields");
+    }
+    profile.username = percentDecodeUtf8(values.at("username"));
+    profile.password = percentDecodeUtf8(values.at("password"));
+    profile.host = percentDecodeUtf8(values.at("host"));
+    profile.port = static_cast<std::uint16_t>(parseProfileInteger(values.at("port"), "port", 1, 65535));
+    profile.path = percentDecodeUtf8(values.at("path"));
+    profile.resolution = percentDecodeUtf8(values.at("resolution"));
+    profile.fps = parseProfileInteger(values.at("fps"), "fps", 1, 240);
+    profile.compression = parseProfileInteger(values.at("compression"), "compression", 0, 100);
+    profile.maximum_bitrate_kbps = parseProfileInteger(values.at("maximum_bitrate_kbps"), "maximum_bitrate_kbps", 1, 1000000);
+    profile.zipstream_strength = parseProfileInteger(values.at("zipstream_strength"), "zipstream_strength", 0, 30);
+    profile.keyframe_interval = parseProfileInteger(values.at("keyframe_interval"), "keyframe_interval", 1, 1000);
+    profile.dynamic_fps = parseProfileInteger(values.at("dynamic_fps"), "dynamic_fps", 0, 1) != 0;
+    profile.audio = parseProfileInteger(values.at("audio"), "audio", 0, 1) != 0;
+    const auto& transport = values.at("transport");
+    profile.transport = transport == "udp" ? RtspTransport::Udp
+        : transport == "default" ? RtspTransport::Default : RtspTransport::Tcp;
+    if (transport != "tcp" && transport != "udp" && transport != "default") throw std::invalid_argument("Invalid profile transport");
+    const auto& acceleration = values.at("video_acceleration");
+    profile.video_acceleration = acceleration == "d3d11" ? VideoAcceleration::D3d11
+        : acceleration == "cpu" ? VideoAcceleration::Cpu : VideoAcceleration::Auto;
+    if (acceleration != "auto" && acceleration != "d3d11" && acceleration != "cpu") throw std::invalid_argument("Invalid profile video acceleration");
+    validateCameraConnectionProfile(profile);
+    return profile;
+}
+
+CameraConnectionProfile parseLegacyCameraUrl(std::wstring_view source, std::wstring_view profile_name) {
+    validateRtspCameraUrl(source);
+    CameraConnectionProfile profile;
+    profile.name = std::wstring(profile_name);
+    const auto scheme_end = source.find(L"://") + 3;
+    const auto authority_end = source.find_first_of(L"/?#", scheme_end);
+    const auto authority = source.substr(scheme_end, authority_end - scheme_end);
+    const auto at = authority.rfind(L'@');
+    auto host_port = authority;
+    if (at != std::wstring_view::npos) {
+        const auto credentials = authority.substr(0, at);
+        const auto colon = credentials.find(L':');
+        profile.username = std::wstring(credentials.substr(0, colon));
+        profile.password = colon == std::wstring_view::npos ? L"" : std::wstring(credentials.substr(colon + 1));
+        host_port = authority.substr(at + 1);
+    }
+    const auto colon = host_port.rfind(L':');
+    profile.host = std::wstring(colon == std::wstring_view::npos ? host_port : host_port.substr(0, colon));
+    if (colon != std::wstring_view::npos) {
+        profile.port = static_cast<std::uint16_t>(std::stoi(std::wstring(host_port.substr(colon + 1))));
+    }
+    const auto query_start = source.find(L'?', authority_end);
+    profile.path = authority_end == std::wstring_view::npos ? L"/axis-media/media.amp"
+        : std::wstring(source.substr(authority_end, (query_start == std::wstring_view::npos ? source.size() : query_start) - authority_end));
+    const auto resolution = queryValue(source, L"resolution");
+    if (!resolution.empty()) profile.resolution = resolution;
+    const auto set_int = [&](std::wstring_view name, int& field) {
+        const auto value = queryValue(source, name);
+        if (!value.empty()) field = std::stoi(value);
+    };
+    set_int(L"fps", profile.fps);
+    set_int(L"compression", profile.compression);
+    set_int(L"videomaxbitrate", profile.maximum_bitrate_kbps);
+    set_int(L"videozstrength", profile.zipstream_strength);
+    set_int(L"videokeyframeinterval", profile.keyframe_interval);
+    profile.audio = queryValue(source, L"audio") == L"1";
+    profile.dynamic_fps = queryValue(source, L"videozfpsmode") == L"dynamic";
+    validateCameraConnectionProfile(profile);
+    return profile;
 }
 
 namespace {
@@ -230,6 +465,105 @@ ManagedModelSet resolveManagedModelSet(
     return result;
 }
 
+namespace {
+
+void appendCandidateOnce(
+    std::vector<std::filesystem::path>& candidates,
+    const std::filesystem::path& candidate) {
+    if (candidate.empty()) return;
+    if (std::ranges::find(candidates, candidate) != candidates.end()) return;
+    candidates.push_back(candidate);
+}
+
+// Walks up from `start` looking for the repo root marker. Depth is bounded so
+// a missing marker degrades to "no repo root" instead of scanning to the drive.
+std::filesystem::path findRepoRoot(const std::filesystem::path& start) {
+    std::filesystem::path directory = start;
+    for (int depth = 0; depth < 12 && !directory.empty(); ++depth) {
+        if (regularFile(directory / L"pyproject.toml")) return directory;
+        const auto parent = directory.parent_path();
+        if (parent == directory) break;
+        directory = parent;
+    }
+    return {};
+}
+
+std::filesystem::path launcherModuleDir() {
+    std::wstring module_path(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(
+        nullptr, module_path.data(), static_cast<DWORD>(module_path.size()));
+    if (length == 0 || length == static_cast<DWORD>(module_path.size())) return {};
+    module_path.resize(length);
+    return std::filesystem::path(module_path).parent_path();
+}
+
+}  // namespace
+
+std::vector<std::filesystem::path> managedModelRootCandidates(
+    const std::filesystem::path& configured_root,
+    const std::filesystem::path& exe_dir) {
+    std::vector<std::filesystem::path> candidates;
+    appendCandidateOnce(candidates, configured_root);
+
+    std::filesystem::path executable_dir = exe_dir;
+    if (executable_dir.empty()) executable_dir = launcherModuleDir();
+    appendCandidateOnce(candidates, executable_dir);
+    if (!executable_dir.empty()) {
+        appendCandidateOnce(candidates, executable_dir / L"models");
+    }
+
+    std::filesystem::path repo_root = findRepoRoot(executable_dir);
+    if (repo_root.empty()) {
+        std::error_code error;
+        repo_root = findRepoRoot(std::filesystem::current_path(error));
+    }
+    if (!repo_root.empty()) {
+        appendCandidateOnce(candidates, repo_root);
+        appendCandidateOnce(candidates, repo_root / L"models");
+        appendCandidateOnce(candidates, repo_root / L"installer" / L"stage" / L"bin" / L"models");
+        appendCandidateOnce(candidates, repo_root / L"installer" / L"stage" / L"models");
+        appendCandidateOnce(
+            candidates, repo_root / L".tools" / L"native" / L"installer" / L"stage" / L"bin" / L"models");
+        appendCandidateOnce(
+            candidates, repo_root / L".tools" / L"native" / L"installer" / L"stage" / L"models");
+    }
+    appendCandidateOnce(
+        candidates,
+        std::filesystem::path(L"C:\\Program Files\\NexoAI Vision\\bin\\models"));
+    appendCandidateOnce(
+        candidates,
+        std::filesystem::path(L"C:\\Program Files\\NexoAI Vision\\models"));
+    return candidates;
+}
+
+std::optional<ManagedModelSet> resolveBestManagedModelSet(
+    const std::vector<std::filesystem::path>& candidates,
+    bool pose_required) {
+    std::optional<ManagedModelSet> tensor_rt_only;
+    for (const auto& candidate : candidates) {
+        if (candidate.empty()) continue;
+        ManagedModelSet models = resolveManagedModelSet(candidate, pose_required);
+        if (models.onnx_complete) return models;
+        if (!tensor_rt_only.has_value() && models.tensor_rt_complete) {
+            tensor_rt_only = models;
+        }
+    }
+    return tensor_rt_only;
+}
+
+std::wstring describeModelCandidates(
+    const std::vector<std::filesystem::path>& candidates) {
+    std::wstring result;
+    bool first = true;
+    for (const auto& candidate : candidates) {
+        if (candidate.empty()) continue;
+        if (!first) result += L"; ";
+        first = false;
+        result += candidate.wstring();
+    }
+    return result.empty() ? L"<no candidate paths>" : result;
+}
+
 float parsePpeConfidenceThreshold(std::wstring_view text) {
     const auto is_digit = [](wchar_t character) {
         return character >= L'0' && character <= L'9';
@@ -285,13 +619,30 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
         throw std::invalid_argument("Telemetry interval must be 1, 5, 10, 30, or 60 seconds");
     }
     validateStreamSettings(settings.stream_resolution, settings.stream_fps);
-    if (settings.source.empty()) {
+    std::vector<CameraLaunchSource> cameras = settings.cameras;
+    if (cameras.empty() && !settings.source.empty()) {
+        cameras.push_back({
+            isRtspSource(settings.source)
+                ? configuredRtspSource(settings.source, settings.stream_resolution, settings.stream_fps)
+                : settings.source,
+            settings.source_label,
+            settings.rtsp_transport,
+            settings.video_acceleration,
+        });
+    }
+    if (cameras.empty()) {
         throw std::invalid_argument("Camera URL or video file is required");
     }
-    if (isRtspSource(settings.source)) {
-        validateRtspCameraUrl(settings.source);
-    } else if (!regularFile(settings.source)) {
-        throw std::invalid_argument("Source must be a valid RTSP URL or an existing video file");
+    std::vector<std::wstring> labels;
+    for (const auto& camera : cameras) {
+        if (isRtspSource(camera.source)) validateRtspCameraUrl(camera.source);
+        else if (!regularFile(camera.source)) {
+            throw std::invalid_argument("Every source must be a valid RTSP URL or an existing video file");
+        }
+        if (hasNonWhitespace(camera.label) && std::ranges::find(labels, camera.label) != labels.end()) {
+            throw std::invalid_argument("Selected camera names must be unique");
+        }
+        if (hasNonWhitespace(camera.label)) labels.push_back(camera.label);
     }
     if (settings.output.empty()) {
         throw std::invalid_argument("Output folder is required");
@@ -323,41 +674,60 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
     }
 
     const bool needs_pose = settings.analytics_mode == AnalyticsMode::PpeFall;
-    const ManagedModelSet models = resolveManagedModelSet(settings.managed_model_root, needs_pose);
+    ManagedModelSet models = resolveManagedModelSet(settings.managed_model_root, needs_pose);
+    std::vector<std::filesystem::path> tried_roots{settings.managed_model_root};
+    if (settings.allow_dev_model_fallback) {
+        tried_roots = managedModelRootCandidates(settings.managed_model_root);
+        const auto direct_onnx = models.onnx_complete;
+        const auto direct_cuda = models.tensor_rt_complete || models.onnx_complete;
+        const bool direct_satisfies =
+            (settings.compute_mode == ComputeMode::Cpu && direct_onnx)
+            || (settings.compute_mode != ComputeMode::Cpu && direct_cuda);
+        if (!direct_satisfies) {
+            if (const auto best = resolveBestManagedModelSet(tried_roots, needs_pose)) {
+                models = *best;
+            }
+        }
+    }
     const bool tensor_rt_candidate = models.tensor_rt_complete;
     const bool cpu_candidate = models.onnx_complete;
 
     const bool cuda_candidate = tensor_rt_candidate || cpu_candidate;
+    const auto missingSetMessage = [&](std::wstring_view prefix) {
+        std::wstring message(prefix);
+        message += describeModelCandidates(tried_roots);
+        return message;
+    };
     if (settings.compute_mode == ComputeMode::Cuda && !cuda_candidate) {
-        std::wstring message = L"The complete managed CUDA model set is missing at ";
-        message += settings.managed_model_root.wstring();
         throw std::invalid_argument(
-            utf8FromWide(message));
+            utf8FromWide(missingSetMessage(L"The complete managed CUDA model set is missing. Tried: ")));
     }
     if (settings.compute_mode == ComputeMode::Cpu && !cpu_candidate) {
-        std::wstring message = L"The complete managed ONNX model set is missing at ";
-        message += settings.managed_model_root.wstring();
         throw std::invalid_argument(
-            utf8FromWide(message));
+            utf8FromWide(missingSetMessage(L"The complete managed ONNX model set is missing. Tried: ")));
     }
     if (settings.compute_mode == ComputeMode::Auto && !cuda_candidate && !cpu_candidate) {
-        std::wstring message = L"No complete managed model set was found at ";
-        message += settings.managed_model_root.wstring();
         throw std::invalid_argument(
-            utf8FromWide(message));
+            utf8FromWide(missingSetMessage(L"No complete managed model set was found. Tried: ")));
     }
 
     LaunchPlan result;
     result.has_cuda_candidate = cuda_candidate;
     result.has_cpu_candidate = cpu_candidate;
     if (preflight) result.arguments.emplace_back(L"--preflight");
-    result.arguments.emplace_back(L"--source");
-    result.arguments.push_back(isRtspSource(settings.source)
-        ? configuredRtspSource(settings.source, settings.stream_resolution, settings.stream_fps)
-        : settings.source);
-    if (hasNonWhitespace(settings.source_label)) {
-        result.arguments.emplace_back(L"--source-label");
-        result.arguments.push_back(settings.source_label);
+    for (const auto& camera : cameras) {
+        result.arguments.emplace_back(L"--source");
+        result.arguments.push_back(camera.source);
+        if (hasNonWhitespace(camera.label)) {
+            result.arguments.emplace_back(L"--source-label");
+            result.arguments.push_back(camera.label);
+        }
+        result.arguments.emplace_back(L"--source-rtsp-transport");
+        result.arguments.emplace_back(camera.transport == RtspTransport::Udp ? L"udp"
+            : camera.transport == RtspTransport::Default ? L"default" : L"tcp");
+        result.arguments.emplace_back(L"--source-video-acceleration");
+        result.arguments.emplace_back(camera.video_acceleration == VideoAcceleration::D3d11 ? L"d3d11"
+            : camera.video_acceleration == VideoAcceleration::Cpu ? L"cpu" : L"auto");
     }
     appendOption(result.arguments, L"--output", settings.output);
     result.arguments.emplace_back(L"--mode");
@@ -619,11 +989,10 @@ void saveOperatorPreferencesAtomic(
 
 std::vector<std::string_view> visibleLauncherControlKeys() {
     return {
-        "source", "source_label", "saved_camera", "output", "analytics", "compute",
-        "rtsp_transport", "video_acceleration", "stream_resolution", "stream_fps",
-        "imgsz", "Gloves", "Person", "Safety_boots", "Vest", "respirador",
-        "tapaorejas", "Hard_hat", "lentes_protectores", "show", "language_icon",
-        "theme_icon", "validate", "start", "stop", "status", "log_path",
+        "camera_profile_list", "camera_profile_new", "camera_profile_edit",
+        "camera_profile_delete", "camera_profile_select_all", "output",
+        "ppe_profile_modal", "advanced_settings_modal", "language_icon", "theme_icon",
+        "validate", "start", "stop", "status", "log_path",
     };
 }
 

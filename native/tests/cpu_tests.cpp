@@ -489,8 +489,30 @@ void testCliUrlsAndInvariantDefense() {
     require(defaults.rtsp_transport == RtspTransport::Tcp
             && defaults.video_acceleration == VideoAcceleration::Auto
             && defaults.capture_read_timeout == std::chrono::milliseconds(3000)
-            && defaults.evidence_writer_queue_capacity == 8,
+            && defaults.evidence_writer_queue_capacity == 8
+            && defaults.ppe_confidence == 0.10F
+            && defaults.ppe_class_confidences[0] == 0.10F,
         "Stable capture and asynchronous evidence defaults changed");
+    auto multiple_sources = base;
+    multiple_sources.insert(multiple_sources.begin() + 3, {
+        "--source-label", "CAM_01", "--source-rtsp-transport", "tcp",
+        "--source", "rtsp://user:password@camera-2/live", "--source-label", "CAM_02",
+        "--source-rtsp-transport", "udp", "--source-video-acceleration", "cpu",
+    });
+    const RuntimeConfig multiple = parse(multiple_sources);
+    require(multiple.sources.size() == 2 && multiple.sources[0].label == "CAM_01"
+            && multiple.sources[1].label == "CAM_02"
+            && multiple.sources[0].rtsp_transport == RtspTransport::Tcp
+            && multiple.sources[1].rtsp_transport == RtspTransport::Udp
+            && multiple.sources[1].video_acceleration == VideoAcceleration::Cpu,
+        "CLI did not preserve repeatable per-camera source settings");
+    auto duplicate_labels = multiple_sources;
+    const auto second_label = std::find(duplicate_labels.begin() + 5, duplicate_labels.end(), "CAM_02");
+    *second_label = "CAM_01";
+    requireThrows([&] { parse(duplicate_labels); }, "CLI accepted duplicate camera labels");
+    auto orphan_label = base;
+    orphan_label.insert(orphan_label.begin() + 1, {"--source-label", "orphan"});
+    requireThrows([&] { parse(orphan_label); }, "CLI accepted --source-label before --source");
     auto queued_evidence = base;
     queued_evidence.insert(queued_evidence.end(), {"--evidence-writer-queue-capacity", "4"});
     require(parse(queued_evidence).evidence_writer_queue_capacity == 4,

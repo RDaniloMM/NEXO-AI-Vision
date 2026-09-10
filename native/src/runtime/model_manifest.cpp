@@ -24,6 +24,32 @@
 namespace cuajone {
 namespace {
 
+// UTF-8 byte-order mark written by Windows PowerShell 5.1 Set-Content
+// -Encoding utf8. The strict manifest parser rejects it, so strip it here
+// and keep the on-disk contract BOM-free (see build-installer.ps1).
+constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF", 3};
+
+std::string_view stripUtf8Bom(std::string_view json) {
+    if (json.size() >= kUtf8Bom.size() && json.substr(0, kUtf8Bom.size()) == kUtf8Bom) {
+        return json.substr(kUtf8Bom.size());
+    }
+    return json;
+}
+
+std::string manifestHeadHex(std::string_view json) {
+    constexpr std::size_t kHeadBytes = 16;
+    const std::size_t head_size = json.size() < kHeadBytes ? json.size() : kHeadBytes;
+    std::ostringstream output;
+    output << std::hex << std::setfill('0');
+    for (std::size_t index = 0; index < head_size; ++index) {
+        if (index != 0) output << ' ';
+        output << std::setw(2)
+               << static_cast<unsigned int>(static_cast<unsigned char>(json[index]));
+    }
+    if (json.size() > kHeadBytes) output << " ...";
+    return output.str();
+}
+
 struct JsonValue {
     using Object = std::map<std::string, JsonValue>;
     using Array = std::vector<JsonValue>;
@@ -366,7 +392,7 @@ void parseDynamicShapeContract(const JsonValue& value, OnnxModelManifest& result
 }
 
 OnnxModelManifest parseManifest(std::string_view json) {
-    const JsonValue parsed = JsonParser(json).parse();
+    const JsonValue parsed = JsonParser(stripUtf8Bom(json)).parse();
     const auto& root = objectValue(parsed, "ONNX manifest");
     const std::string role = stringValue(required(root, "role"), "role", 16);
     const std::size_t schema_version = integerValue(
@@ -771,7 +797,7 @@ std::string_view modelRoleName(ModelRole role) noexcept {
 }
 
 OnnxModelManifest parseOnnxModelManifest(std::string_view json) {
-    return parseManifest(json);
+    return parseManifest(stripUtf8Bom(json));
 }
 
 std::string sha256Hex(std::span<const std::byte> bytes) {
@@ -795,7 +821,16 @@ VerifiedOnnxModel verifyOnnxModel(const std::filesystem::path& model_path, Model
         manifest_path, resource_limits::kMaximumManifestBytes, "ONNX manifest");
     const std::string_view manifest_json(
         reinterpret_cast<const char*>(manifest_bytes.data()), manifest_bytes.size());
-    OnnxModelManifest manifest = parseOnnxModelManifest(manifest_json);
+    OnnxModelManifest manifest;
+    try {
+        manifest = parseOnnxModelManifest(manifest_json);
+    } catch (const std::exception& error) {
+        std::ostringstream message;
+        message << "Invalid ONNX manifest " << manifest_path.string() << " ("
+                << manifest_bytes.size() << " bytes, head hex: "
+                << manifestHeadHex(manifest_json) << "): " << error.what();
+        throw std::runtime_error(message.str());
+    }
     if (manifest.role != expected_role) {
         throw std::runtime_error(
             "ONNX manifest role is " + std::string(modelRoleName(manifest.role))

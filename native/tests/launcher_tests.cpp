@@ -114,7 +114,7 @@ void testCameraOrVideoSourceIsRequired() {
     settings.source = L"rtsp://camera.example/live";
     const auto plan = buildLaunchPlan(settings, false);
     require(argumentValue(plan.arguments, L"--source")
-            == L"rtsp://camera.example/live?resolution=1920x1080&fps=30",
+            == L"rtsp://camera.example/live?resolution=1920x1080&fps=25",
         "Launcher did not apply the default RTSP resolution and frame rate");
 
     settings.source = L"rtsp://camera.example/axis-media/media.amp?"
@@ -358,22 +358,21 @@ void testPreferencesPersistenceAndUiContract() {
             && legacy.ppe_class_confidences[7] == 0.88F && legacy.show_window
             && legacy.rtsp_transport == RtspTransport::Tcp
             && legacy.video_acceleration == VideoAcceleration::Auto
-            && legacy.stream_resolution == L"1920x1080" && legacy.stream_fps == 30
+            && legacy.stream_resolution == L"1920x1080" && legacy.stream_fps == 25
             && std::ranges::all_of(legacy.ppe_enabled, [](bool enabled) { return enabled; }),
         "Legacy preferences did not retain settings and default annotated video to enabled");
     std::ofstream(path, std::ios::binary | std::ios::trunc) << "corrupt";
     const auto fallback = loadOperatorPreferences(path);
     require(fallback.language == UiLanguage::English && fallback.theme == ThemeMode::Light
-            && fallback.image_size == 640 && fallback.ppe_class_confidences[0] == 0.30F
+            && fallback.image_size == 640 && fallback.ppe_class_confidences[0] == 0.10F
             && fallback.show_window,
         "Corrupt preferences did not fail closed to defaults");
 
     const auto controls = visibleLauncherControlKeys();
     for (const std::string_view required : {
-             "imgsz", "Gloves", "Person", "Safety_boots", "Vest", "respirador",
-             "tapaorejas", "Hard_hat", "lentes_protectores", "rtsp_transport",
-             "video_acceleration", "stream_resolution", "stream_fps",
-             "language_icon", "theme_icon"}) {
+             "camera_profile_list", "camera_profile_new", "camera_profile_edit",
+             "camera_profile_delete", "camera_profile_select_all", "ppe_profile_modal",
+             "advanced_settings_modal", "language_icon", "theme_icon"}) {
         require(std::ranges::find(controls, required) != controls.end(),
             "Required launcher control is missing from the UI contract");
     }
@@ -382,6 +381,44 @@ void testPreferencesPersistenceAndUiContract() {
         require(std::ranges::find(controls, forbidden) == controls.end(),
             "Model-path control leaked into the UI contract");
     }
+}
+
+void testAxisCameraProfilesAndMultiCameraPlan() {
+    CameraConnectionProfile profile;
+    profile.name = L"CAMARA_AXIS_01";
+    const std::wstring expected =
+        L"rtsp://user:password@IP:554/axis-media/media.amp?"
+        L"videocodec=h264&h264profile=high&resolution=1920x1080&fps=25&audio=0&compression=30&"
+        L"videobitratemode=mbr&videomaxbitrate=6000&videobitratepriority=quality&videozstrength=10&"
+        L"videozgopmode=fixed&videozfpsmode=fixed&videokeyframeinterval=15";
+    require(buildAxisRtspUrl(profile) == expected,
+        "Default AXIS profile URL does not match the requested operational profile");
+    const std::string payload = serializeCameraConnectionProfile(profile);
+    const auto roundtrip = parseCameraConnectionProfile(payload, profile.name);
+    require(roundtrip.name == profile.name && roundtrip.host == L"IP"
+            && roundtrip.fps == 25 && roundtrip.keyframe_interval == 15
+            && roundtrip.maximum_bitrate_kbps == 6000
+            && roundtrip.transport == RtspTransport::Tcp && !roundtrip.audio
+            && !roundtrip.dynamic_fps,
+        "Versioned camera profile did not roundtrip");
+
+    TemporaryTree tree;
+    auto settings = baseSettings(tree);
+    addTensorRtModels(settings, tree);
+    settings.source.clear();
+    settings.cameras = {
+        {expected, L"CAMARA_AXIS_01", RtspTransport::Tcp, VideoAcceleration::Auto},
+        {L"rtsp://u:p@10.0.0.2/live", L"CAMARA_AXIS_02", RtspTransport::Udp, VideoAcceleration::Cpu},
+    };
+    const auto plan = buildLaunchPlan(settings, false);
+    require(std::count(plan.arguments.begin(), plan.arguments.end(), L"--source") == 2
+            && std::count(plan.arguments.begin(), plan.arguments.end(), L"--source-label") == 2
+            && std::count(plan.arguments.begin(), plan.arguments.end(), L"--source-rtsp-transport") == 2
+            && contains(plan.arguments, L"CAMARA_AXIS_01") && contains(plan.arguments, L"CAMARA_AXIS_02"),
+        "Multi-camera plan did not emit two independently configured sources");
+    settings.cameras[1].label = settings.cameras[0].label;
+    requireThrows([&] { buildLaunchPlan(settings, false); },
+        "Multi-camera plan accepted duplicate source labels");
 }
 
 void testWindowsQuoting() {
@@ -530,6 +567,7 @@ int main(int argc, char** argv) {
         {"Windows command-line quoting", testWindowsQuoting},
         {"RTSP credential redaction", testCredentialRedaction},
         {"saved camera profile names", testSavedCameraProfileNames},
+        {"AXIS profiles and multi-camera plan", testAxisCameraProfilesAndMultiCameraPlan},
     };
     for (const auto& [name, test] : tests) {
         try {
