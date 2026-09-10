@@ -4,8 +4,10 @@
 
 #include "cuajone/model_manifest.hpp"
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#endif
 
 #include <array>
 #include <cstddef>

@@ -12,7 +12,8 @@
 #
 # Usage:
 #   source native/activate-native.sh [--cpu-only]
-# (--cpu-only is accepted for parity with the .ps1; Linux Fase 0 is CPU-only.)
+# (--cpu-only is accepted for parity with the .ps1; Linux Fase 1 builds the
+# POSIX runtime CPU-only: no CUDA/TensorRT until Fase 3.)
 
 if [ -n "${BASH_SOURCE:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then
     _CUAJONE_SOURCED=1
@@ -34,7 +35,8 @@ _CUAJONE_PROJECT_ROOT="$(dirname "${_CUAJONE_SCRIPT_DIR}")"
 _CUAJONE_TOOL_ROOT="${_CUAJONE_PROJECT_ROOT}/.tools/native"
 
 # --- Toolchain locations (override by exporting before sourcing) ---
-# ONNX Runtime: unused in Fase 0 (native runtime lands in Fase 1).
+# ONNX Runtime: Linux 1.25.0 package (Fase 1 runtime); provision it with the
+# 'Provision ONNX Runtime' step of .github/workflows/linux-build.yml.
 : "${ONNXRUNTIME_ROOT:=${_CUAJONE_TOOL_ROOT}/linux-onnxruntime-1.25.0}"
 # OpenCV: empty means CMake system search, which finds apt libopencv-dev
 # (/usr/lib/x86_64-linux-gnu/cmake/opencv4). Point at a custom build if needed.
@@ -63,7 +65,7 @@ if [ "${_CUAJONE_CPU_ONLY}" -eq 1 ]; then
     unset TENSORRT_ROOT CUDA_ROOT
 fi
 
-# --- Fase 0 dependency warnings (non-fatal; CI installs these via apt) ---
+# --- Fase 1 dependency warnings (non-fatal; CI installs these via apt) ---
 _cuaje_warn_missing() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "activate-native.sh: warning: '$1' not found ($2)" >&2
@@ -73,6 +75,10 @@ _cuaje_warn_missing gcc "sudo apt install build-essential"
 _cuaje_warn_missing ninja "sudo apt install ninja-build"
 if [ ! -d /usr/lib/x86_64-linux-gnu/cmake/opencv4 ] && [ -z "${OpenCV_DIR}" ]; then
     echo "activate-native.sh: warning: system OpenCV not found (sudo apt install libopencv-dev) and OpenCV_DIR is empty" >&2
+fi
+if [ ! -f "${ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h" ]; then
+    echo "activate-native.sh: warning: Linux ONNX Runtime 1.25.0 not found under ${ONNXRUNTIME_ROOT}" >&2
+    echo "  Replicate the 'Provision ONNX Runtime' step of .github/workflows/linux-build.yml" >&2
 fi
 if [ ! -f "${_CUAJONE_TOOL_ROOT}/dependencies/byte-track-eigen-a865158906f6138465668810a98ffd918d95f9a3/.cuajone-source-receipt.json" ]; then
     echo "activate-native.sh: warning: pinned ByteTrack/Eigen sources are missing under .tools/native/dependencies" >&2

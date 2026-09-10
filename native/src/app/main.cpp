@@ -247,6 +247,8 @@ EnginePipelineConfig enginePipelineConfig(
     };
 #ifdef CUAJONE_INTERNAL_DIAGNOSTICS
     // This is deliberately unavailable in production binaries and only applies to offline benchmarks.
+    // _dupenv_s is MSVC-only; POSIX uses getenv (borrowed pointer, no free).
+#ifdef _WIN32
     char* serial_hybrid_benchmark{};
     std::size_t serial_hybrid_benchmark_length{};
     if (_dupenv_s(
@@ -254,8 +256,12 @@ EnginePipelineConfig enginePipelineConfig(
             "CUAJONE_INTERNAL_SERIAL_HYBRID_BENCHMARK") != 0) {
         throw std::runtime_error("Could not read the internal serial hybrid benchmark switch");
     }
+#else
+    char* serial_hybrid_benchmark = std::getenv("CUAJONE_INTERNAL_SERIAL_HYBRID_BENCHMARK");
+#endif
     pipeline_config.force_serial_hybrid = !config.benchmark_image.empty()
         && serial_hybrid_benchmark != nullptr && std::string_view(serial_hybrid_benchmark) == "1";
+#ifdef _WIN32
     std::free(serial_hybrid_benchmark);
     char* separate_hybrid_preprocessing{};
     std::size_t separate_hybrid_preprocessing_length{};
@@ -264,8 +270,13 @@ EnginePipelineConfig enginePipelineConfig(
             "CUAJONE_INTERNAL_SEPARATE_HYBRID_PREPROCESSING") != 0) {
         throw std::runtime_error("Could not read the internal separate hybrid preprocessing switch");
     }
+#else
+    char* separate_hybrid_preprocessing =
+        std::getenv("CUAJONE_INTERNAL_SEPARATE_HYBRID_PREPROCESSING");
+#endif
     pipeline_config.force_separate_hybrid_preprocessing = !config.benchmark_image.empty()
         && separate_hybrid_preprocessing != nullptr && std::string_view(separate_hybrid_preprocessing) == "1";
+#ifdef _WIN32
     std::free(separate_hybrid_preprocessing);
     char* serial_tensorrt_benchmark{};
     std::size_t serial_tensorrt_benchmark_length{};
@@ -274,9 +285,15 @@ EnginePipelineConfig enginePipelineConfig(
             "CUAJONE_INTERNAL_SERIAL_TENSORRT_BENCHMARK") != 0) {
         throw std::runtime_error("Could not read the internal serial TensorRT benchmark switch");
     }
+#else
+    char* serial_tensorrt_benchmark =
+        std::getenv("CUAJONE_INTERNAL_SERIAL_TENSORRT_BENCHMARK");
+#endif
     pipeline_config.force_serial_tensorrt = !config.benchmark_image.empty()
         && serial_tensorrt_benchmark != nullptr && std::string_view(serial_tensorrt_benchmark) == "1";
+#ifdef _WIN32
     std::free(serial_tensorrt_benchmark);
+#endif
 #endif
     return pipeline_config;
 }
@@ -347,7 +364,8 @@ std::unique_ptr<NativeEnginePipeline> runBasePreflight(
                 const char* transport = source.rtsp_transport == RtspTransport::Tcp
                     ? "tcp" : source.rtsp_transport == RtspTransport::Udp ? "udp" : "default";
                 const char* acceleration = source.video_acceleration == VideoAcceleration::D3d11
-                    ? "d3d11" : source.video_acceleration == VideoAcceleration::Cpu ? "cpu" : "auto";
+                    ? "d3d11" : source.video_acceleration == VideoAcceleration::Vaapi
+                    ? "vaapi" : source.video_acceleration == VideoAcceleration::Cpu ? "cpu" : "auto";
                 std::cout << "RTSP transport: " << transport
                           << " | requested video acceleration: " << acceleration
                           << " | read timeout: " << config.capture_read_timeout.count() << " ms\n";
@@ -421,7 +439,11 @@ std::string observedAtUtc() {
         now.time_since_epoch()) % 1000;
     const std::time_t time = std::chrono::system_clock::to_time_t(now);
     std::tm utc{};
+#ifdef _WIN32
     gmtime_s(&utc, &time);
+#else
+    gmtime_r(&time, &utc);
+#endif
     std::ostringstream output;
     output << std::put_time(&utc, "%Y-%m-%dT%H:%M:%S") << '.'
            << std::setfill('0') << std::setw(3) << milliseconds.count() << 'Z';

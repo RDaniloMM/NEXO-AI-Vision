@@ -19,6 +19,7 @@ enum class RtspTransport {
 enum class VideoAcceleration {
     Auto,
     D3d11,
+    Vaapi,
     Cpu,
 };
 

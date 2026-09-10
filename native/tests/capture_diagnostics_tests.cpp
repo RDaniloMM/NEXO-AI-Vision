@@ -5,6 +5,9 @@
 #define NOMINMAX
 #endif
 #include <winsock2.h>
+#else
+#include <cerrno>
+#include <netdb.h>
 #endif
 
 #include "cuajone/capture.hpp"
@@ -90,12 +93,23 @@ void testConnectErrorClassification() {
             == RtspReachabilityReason::Unknown,
         "Unrecognized resolver/API error was not classified as unknown");
 #else
-    require(classifyRtspConnectError(0) == RtspReachabilityReason::Unknown,
-        "Unsupported socket errors must retain the safe unknown fallback");
+    // POSIX (Fase 1): same categories over errno/getaddrinfo codes.
+    require(classifyRtspConnectError(ENETUNREACH) == RtspReachabilityReason::NoRoute,
+        "Network-unreachable error was not classified as no_route");
+    require(classifyRtspConnectError(ETIMEDOUT) == RtspReachabilityReason::TcpTimeout,
+        "Timed-out connection was not classified as tcp_timeout");
+    require(classifyRtspConnectError(ECONNREFUSED) == RtspReachabilityReason::ConnectionRefused,
+        "Refused connection was not classified as connection_refused");
+    require(classifyRtspConnectError(EINVAL) == RtspReachabilityReason::Unknown,
+        "Unrecognized socket error was not classified as unknown");
+    require(classifyRtspResolutionFailure(
+                RtspAddressPath::HostnameResolution, EAI_NONAME)
+            == RtspReachabilityReason::DnsFailure,
+        "Hostname-resolution failure was not classified as dns_failure");
     require(classifyRtspResolutionFailure(
                 RtspAddressPath::HostnameResolution, 0)
             == RtspReachabilityReason::Unknown,
-        "Unsupported resolver errors must retain the safe unknown fallback");
+        "Unrecognized resolver error was not classified as unknown");
 #endif
 }
 

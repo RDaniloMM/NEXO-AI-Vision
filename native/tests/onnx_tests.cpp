@@ -275,6 +275,17 @@ void testDynamicManifestContract() {
         "approved bounded role schema", "Unapproved dynamic output formula was accepted");
 }
 
+void testSha256KnownAnswer() {
+    // FIPS 180-4 vectors: pin the portable (non-BCrypt) SHA-256 used on Linux.
+    Bytes abc;
+    for (const char character : std::string("abc")) abc.push_back(static_cast<std::byte>(character));
+    require(sha256Hex(abc) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "SHA-256 known-answer vector for \"abc\" failed");
+    require(sha256Hex(std::span<const std::byte>{})
+            == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "SHA-256 known-answer vector for empty input failed");
+}
+
 }  // namespace
 
 int main() {
@@ -288,6 +299,7 @@ int main() {
         {"external data and custom operators", testExternalDataAndCustomOperatorsRejected},
         {"manifest resource limits", testManifestResourceLimits},
         {"bounded dynamic manifest contract", testDynamicManifestContract},
+        {"sha256 known-answer vectors", testSha256KnownAnswer},
     };
     int failures = 0;
     for (const auto& [name, test] : tests) {

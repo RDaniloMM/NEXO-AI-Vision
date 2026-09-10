@@ -4,9 +4,14 @@
 #include "cuajone/inference_settings.hpp"
 #include "cuajone/resource_limits.hpp"
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <bcrypt.h>
+#else
+#include <cstdint>
+#include <cstring>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -565,6 +570,7 @@ std::vector<std::byte> readBoundedFile(
 }
 
 std::string calculateSha256(std::span<const std::byte> bytes) {
+#ifdef _WIN32
     BCRYPT_ALG_HANDLE algorithm = nullptr;
     BCRYPT_HASH_HANDLE hash = nullptr;
     if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0) {
@@ -601,6 +607,144 @@ std::string calculateSha256(std::span<const std::byte> bytes) {
     output << std::hex << std::setfill('0');
     for (const unsigned char byte : digest) output << std::setw(2) << static_cast<unsigned int>(byte);
     return output.str();
+#else
+    // Minimal self-contained SHA-256 (FIPS 180-4) so Linux builds add no
+    // crypto dependency; Windows keeps using BCrypt above. Correctness is
+    // pinned by the sha256Hex known-answer test in tests/onnx_tests.cpp.
+    class Sha256 {
+    public:
+        void update(const unsigned char* data, std::size_t size) {
+            while (size > 0) {
+                const std::size_t room = 64 - buffered_;
+                const std::size_t take = size < room ? size : room;
+                std::memcpy(block_ + buffered_, data, take);
+                buffered_ += take;
+                data += take;
+                size -= take;
+                total_ += take;
+                if (buffered_ == 64) {
+                    compress(block_);
+                    buffered_ = 0;
+                }
+            }
+        }
+
+        std::array<unsigned char, 32> finalize() {
+            const std::uint64_t bit_length = total_ * 8U;
+            const unsigned char one = 0x80;
+            update(&one, 1);
+            const unsigned char zero = 0x00;
+            while (buffered_ != 56) update(&zero, 1);
+            unsigned char length_bytes[8];
+            for (int index = 0; index < 8; ++index) {
+                length_bytes[index] =
+                    static_cast<unsigned char>((bit_length >> (56 - 8 * index)) & 0xFFU);
+            }
+            update(length_bytes, 8);
+            std::array<unsigned char, 32> digest{};
+            for (int index = 0; index < 8; ++index) {
+                digest[static_cast<std::size_t>(index) * 4 + 0] =
+                    static_cast<unsigned char>((state_[index] >> 24U) & 0xFFU);
+                digest[static_cast<std::size_t>(index) * 4 + 1] =
+                    static_cast<unsigned char>((state_[index] >> 16U) & 0xFFU);
+                digest[static_cast<std::size_t>(index) * 4 + 2] =
+                    static_cast<unsigned char>((state_[index] >> 8U) & 0xFFU);
+                digest[static_cast<std::size_t>(index) * 4 + 3] =
+                    static_cast<unsigned char>(state_[index] & 0xFFU);
+            }
+            return digest;
+        }
+
+    private:
+        static std::uint32_t rotateRight(std::uint32_t value, unsigned int bits) noexcept {
+            return (value >> bits) | (value << (32U - bits));
+        }
+
+        void compress(const unsigned char* block) {
+            static constexpr std::uint32_t k[64] = {
+                0x428A2F98U, 0x71374491U, 0xB5C0FBCFU, 0xE9B5DBA5U,
+                0x3956C25BU, 0x59F111F1U, 0x923F82A4U, 0xAB1C5ED5U,
+                0xD807AA98U, 0x12835B01U, 0x243185BEU, 0x550C7DC3U,
+                0x72BE5D74U, 0x80DEB1FEU, 0x9BDC06A7U, 0xC19BF174U,
+                0xE49B69C1U, 0xEFBE4786U, 0x0FC19DC6U, 0x240CA1CCU,
+                0x2DE92C6FU, 0x4A7484AAU, 0x5CB0A9DCU, 0x76F988DAU,
+                0x983E5152U, 0xA831C66DU, 0xB00327C8U, 0xBF597FC7U,
+                0xC6E00BF3U, 0xD5A79147U, 0x06CA6351U, 0x14292967U,
+                0x27B70A85U, 0x2E1B2138U, 0x4D2C6DFCU, 0x53380D13U,
+                0x650A7354U, 0x766A0ABBU, 0x81C2C92EU, 0x92722C85U,
+                0xA2BFE8A1U, 0xA81A664BU, 0xC24B8B70U, 0xC76C51A3U,
+                0xD192E819U, 0xD6990624U, 0xF40E3585U, 0x106AA070U,
+                0x19A4C116U, 0x1E376C08U, 0x2748774CU, 0x34B0BCB5U,
+                0x391C0CB3U, 0x4ED8AA4AU, 0x5B9CCA4FU, 0x682E6FF3U,
+                0x748F82EEU, 0x78A5636FU, 0x84C87814U, 0x8CC70208U,
+                0x90BEFFFAU, 0xA4506CEBU, 0xBEF9A3F7U, 0xC67178F2U,
+            };
+            std::uint32_t schedule[64];
+            for (int index = 0; index < 16; ++index) {
+                schedule[index] =
+                    (static_cast<std::uint32_t>(block[index * 4]) << 24U)
+                    | (static_cast<std::uint32_t>(block[index * 4 + 1]) << 16U)
+                    | (static_cast<std::uint32_t>(block[index * 4 + 2]) << 8U)
+                    | static_cast<std::uint32_t>(block[index * 4 + 3]);
+            }
+            for (int index = 16; index < 64; ++index) {
+                const std::uint32_t s0 = rotateRight(schedule[index - 15], 7)
+                    ^ rotateRight(schedule[index - 15], 18) ^ (schedule[index - 15] >> 3U);
+                const std::uint32_t s1 = rotateRight(schedule[index - 2], 17)
+                    ^ rotateRight(schedule[index - 2], 19) ^ (schedule[index - 2] >> 10U);
+                schedule[index] = schedule[index - 16] + s0 + schedule[index - 7] + s1;
+            }
+            std::uint32_t a = state_[0];
+            std::uint32_t b = state_[1];
+            std::uint32_t c = state_[2];
+            std::uint32_t d = state_[3];
+            std::uint32_t e = state_[4];
+            std::uint32_t f = state_[5];
+            std::uint32_t g = state_[6];
+            std::uint32_t h = state_[7];
+            for (int index = 0; index < 64; ++index) {
+                const std::uint32_t s1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+                const std::uint32_t ch = (e & f) ^ (~e & g);
+                const std::uint32_t t1 = h + s1 + ch + k[index] + schedule[index];
+                const std::uint32_t s0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+                const std::uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+                const std::uint32_t t2 = s0 + maj;
+                h = g;
+                g = f;
+                f = e;
+                e = d + t1;
+                d = c;
+                c = b;
+                b = a;
+                a = t1 + t2;
+            }
+            state_[0] += a;
+            state_[1] += b;
+            state_[2] += c;
+            state_[3] += d;
+            state_[4] += e;
+            state_[5] += f;
+            state_[6] += g;
+            state_[7] += h;
+        }
+
+        std::uint32_t state_[8] = {
+            0x6A09E667U, 0xBB67AE85U, 0x3C6EF372U, 0xA54FF53AU,
+            0x510E527FU, 0x9B05688CU, 0x1F83D9ABU, 0x5BE0CD19U,
+        };
+        unsigned char block_[64]{};
+        std::size_t buffered_{};
+        std::uint64_t total_{};
+    };
+
+    Sha256 sha;
+    sha.update(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size());
+    const auto digest = sha.finalize();
+    std::ostringstream output;
+    output << std::hex << std::setfill('0');
+    for (const unsigned char byte : digest) output << std::setw(2) << static_cast<unsigned int>(byte);
+    return output.str();
+#endif
 }
 
 class ProtoReader {

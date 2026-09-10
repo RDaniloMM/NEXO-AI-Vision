@@ -10,6 +10,14 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <netdb.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 #include <opencv2/imgcodecs.hpp>
@@ -103,6 +111,14 @@ private:
     WSADATA data_{};
     bool started_{};
 };
+#else
+// POSIX needs no process-wide socket startup: keep the type so the probe
+// below shares its structure with the Windows branch.
+class WinsockSession {
+public:
+    [[nodiscard]] bool started() const noexcept { return true; }
+};
+#endif
 
 int reasonPriority(RtspReachabilityReason reason) {
     switch (reason) {
@@ -119,7 +135,6 @@ void retainMoreSpecificReason(
     RtspReachabilityReason candidate) {
     if (!retained || reasonPriority(candidate) > reasonPriority(*retained)) retained = candidate;
 }
-#endif
 
 RtspReachabilityReason probeRtspReachability(
     const RtspAuthority& authority,
@@ -221,9 +236,94 @@ RtspReachabilityReason probeRtspReachability(
     FreeAddrInfoExA(addresses);
     return failure.value_or(RtspReachabilityReason::Unknown);
 #else
-    (void)authority;
-    (void)timeout;
-    return RtspReachabilityReason::Unknown;
+    if (timeout.count() <= 0) return RtspReachabilityReason::Unknown;
+
+    WinsockSession winsock;
+    if (!winsock.started()) return RtspReachabilityReason::Unknown;
+
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    const RtspAddressPath address_path = classifyRtspAddressPath(authority.host);
+    if (address_path == RtspAddressPath::DirectAddress) hints.ai_flags |= AI_NUMERICHOST;
+    const std::string service = std::to_string(authority.port);
+    // NOTE: getaddrinfo exposes no timeout parameter; DNS resolution is
+    // bounded by the system resolver. Only the TCP connect phase below
+    // honors the preflight deadline.
+    addrinfo* addresses = nullptr;
+    const int resolution_error = getaddrinfo(
+        authority.host.c_str(), service.c_str(), &hints, &addresses);
+    if (resolution_error != 0) {
+        return classifyRtspResolutionFailure(address_path, resolution_error);
+    }
+    struct AddressList {
+        addrinfo* list;
+        ~AddressList() { if (list != nullptr) freeaddrinfo(list); }
+    };
+    const AddressList owned{addresses};
+
+    std::optional<RtspReachabilityReason> failure;
+    for (const addrinfo* address = addresses; address != nullptr; address = address->ai_next) {
+        const int socket_handle = socket(
+            address->ai_family, address->ai_socktype, address->ai_protocol);
+        if (socket_handle < 0) {
+            retainMoreSpecificReason(failure, classifyRtspConnectError(errno));
+            continue;
+        }
+        const auto close_socket = [&] { close(socket_handle); };
+        const int flags = fcntl(socket_handle, F_GETFL, 0);
+        if (flags < 0 || fcntl(socket_handle, F_SETFL, flags | O_NONBLOCK) < 0) {
+            retainMoreSpecificReason(failure, classifyRtspConnectError(errno));
+            close_socket();
+            continue;
+        }
+        if (connect(socket_handle, address->ai_addr, address->ai_addrlen) == 0) {
+            close_socket();
+            return RtspReachabilityReason::RtspHandshakeFailed;
+        }
+
+        const int connect_error = errno;
+        if (connect_error != EINPROGRESS) {
+            retainMoreSpecificReason(failure, classifyRtspConnectError(connect_error));
+            close_socket();
+            continue;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            retainMoreSpecificReason(failure, RtspReachabilityReason::TcpTimeout);
+            close_socket();
+            continue;
+        }
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+        pollfd waiting{};
+        waiting.fd = socket_handle;
+        waiting.events = POLLOUT;
+        const int selected = poll(&waiting, 1, static_cast<int>(remaining.count()));
+        if (selected == 0) {
+            retainMoreSpecificReason(failure, RtspReachabilityReason::TcpTimeout);
+            close_socket();
+            continue;
+        }
+        if (selected < 0) {
+            retainMoreSpecificReason(failure, classifyRtspConnectError(errno));
+            close_socket();
+            continue;
+        }
+        int socket_error{};
+        socklen_t socket_error_size = sizeof(socket_error);
+        if (getsockopt(socket_handle, SOL_SOCKET, SO_ERROR,
+                &socket_error, &socket_error_size) != 0) {
+            retainMoreSpecificReason(failure, classifyRtspConnectError(errno));
+        } else if (socket_error == 0) {
+            close_socket();
+            return RtspReachabilityReason::RtspHandshakeFailed;
+        } else {
+            retainMoreSpecificReason(failure, classifyRtspConnectError(socket_error));
+        }
+        close_socket();
+    }
+    return failure.value_or(RtspReachabilityReason::Unknown);
 #endif
 }
 
@@ -278,7 +378,12 @@ RtspReachabilityReason classifyRtspConnectError(int native_error) noexcept {
     if (native_error == WSAETIMEDOUT) return RtspReachabilityReason::TcpTimeout;
     if (native_error == WSAECONNREFUSED) return RtspReachabilityReason::ConnectionRefused;
 #else
-    (void)native_error;
+    if (native_error == ENETUNREACH || native_error == EHOSTUNREACH
+        || native_error == EHOSTDOWN) {
+        return RtspReachabilityReason::NoRoute;
+    }
+    if (native_error == ETIMEDOUT) return RtspReachabilityReason::TcpTimeout;
+    if (native_error == ECONNREFUSED) return RtspReachabilityReason::ConnectionRefused;
 #endif
     return RtspReachabilityReason::Unknown;
 }
@@ -293,7 +398,13 @@ RtspReachabilityReason classifyRtspResolutionFailure(
         return RtspReachabilityReason::DnsFailure;
     }
 #else
-    (void)native_error;
+    if (native_error == EAI_AGAIN || native_error == EAI_FAIL || native_error == EAI_NONAME
+#ifdef EAI_NODATA
+        || native_error == EAI_NODATA
+#endif
+    ) {
+        return RtspReachabilityReason::DnsFailure;
+    }
 #endif
     return RtspReachabilityReason::Unknown;
 }
@@ -552,6 +663,11 @@ void LatestFrameCapture::readerLoop(std::stop_token stop_token) {
                 int acceleration = cv::VIDEO_ACCELERATION_ANY;
                 if (video_acceleration_ == VideoAcceleration::D3d11) {
                     acceleration = cv::VIDEO_ACCELERATION_D3D11;
+                } else if (video_acceleration_ == VideoAcceleration::Vaapi) {
+                    // VIDEO_ACCELERATION_VAAPI exists since OpenCV 4.5, so both
+                    // the Windows 4.8 and apt 4.6 builds expose it. A failed
+                    // VAAPI open falls through to the software retry below.
+                    acceleration = cv::VIDEO_ACCELERATION_VAAPI;
                 } else if (video_acceleration_ == VideoAcceleration::Cpu) {
                     acceleration = cv::VIDEO_ACCELERATION_NONE;
                 }

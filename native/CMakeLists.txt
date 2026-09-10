@@ -185,6 +185,9 @@ target_include_directories(cuajone_compute PUBLIC include)
 target_compile_features(cuajone_compute PUBLIC cxx_std_20)
 if(WIN32)
     target_link_libraries(cuajone_compute PRIVATE dxgi advapi32)
+else()
+    # dlopen/dlsym for the Linux CUDA Driver API probe.
+    target_link_libraries(cuajone_compute PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 add_library(cuajone_contracts
@@ -277,11 +280,11 @@ if(CUAJONE_BUILD_TESTS)
             "building portable core libraries and cpu_tests only")
     endif()
 
-    # Linux Fase 0: launcher_tests need cuajone_launcher_support (<windows.h>)
-    # and Win32 .rc fixtures; excluded until the Fase 2 Qt6 GUI. Likewise,
-    # capture_diagnostics_tests needs a POSIX reachability port (Fase 1) and
-    # evidence/onnx tests need the runtime port + Linux ORT package (Fase 1),
-    # so they stay inside the Windows-only runtime block below.
+    # Linux Fase 1: launcher_tests still need cuajone_launcher_support
+    # (<windows.h>) and Win32 .rc fixtures; excluded until the Fase 2 Qt6 GUI.
+    # The POSIX runtime port (capture reachability, portable SHA-256, Linux
+    # ONNX Runtime package) enables evidence, onnx, and capture_diagnostics
+    # tests on UNIX in the runtime block below.
     if(CUAJONE_BUILD_LAUNCHER AND NOT UNIX)
         add_executable(cuajone_launcher_tests tests/launcher_tests.cpp)
         if(WIN32)
@@ -313,30 +316,56 @@ if(CUAJONE_BUILD_TESTS)
 endif()
 
 if(UNIX AND CUAJONE_BUILD_RUNTIME)
-    # Linux Fase 0: the native runtime (capture/evidence/model_manifest include
-    # <windows.h>/<bcrypt.h>/<winsock2.h> unconditionally; installer custom
-    # action needs msiquery.h) is excluded. The POSIX port lands in Fase 1 and
-    # the Qt6 GUI + packaging in Fase 2; see docs/LinuxPort.md. Nothing below
-    # uses FATAL_ERROR on UNIX for this: absence of the runtime is expected.
+    # Linux Fase 1: the POSIX runtime port (capture BSD-sockets reachability,
+    # portable SHA-256, Linux ONNX Runtime package) builds cuajone_runtime and
+    # the NexoAIVision CLI below. Still excluded: Win32 launcher + Qt6 GUI
+    # (Fase 2), installer custom action (msiquery.h), TensorRT/CUDA backends
+    # (Fase 3), dumpbin closure copy, delayimp/DELAYLOAD; see docs/LinuxPort.md.
     message(STATUS
-        "Linux Fase 0: native runtime excluded "
-        "(POSIX port lands in Fase 1, Qt6 GUI + packaging in Fase 2); "
-        "portable core libraries and cpu_tests still build")
+        "Linux Fase 1: building POSIX runtime (cuajone_runtime + NexoAIVision CLI); "
+        "launcher/Qt6 GUI lands in Fase 2, CUDA/TensorRT in Fase 3")
 endif()
 
-if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
-    if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-        message(FATAL_ERROR "The native runtime currently supports Windows x64 only")
-    endif()
-    if(NOT MSVC)
-        message(FATAL_ERROR "The native runtime requires the MSVC C++ toolchain")
+if(CUAJONE_BUILD_RUNTIME)
+    if(UNIX)
+        if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+            message(FATAL_ERROR "The native runtime currently supports 64-bit Linux only")
+        endif()
+    else()
+        if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+            message(FATAL_ERROR "The native runtime currently supports Windows x64 only")
+        endif()
+        if(NOT MSVC)
+            message(FATAL_ERROR "The native runtime requires the MSVC C++ toolchain")
+        endif()
     endif()
 
-    set(ONNXRUNTIME_ROOT "" CACHE PATH "ONNX Runtime 1.25.0 Windows x64 CPU package root")
+    set(ONNXRUNTIME_ROOT "" CACHE PATH "ONNX Runtime 1.25.0 package root")
     if(NOT ONNXRUNTIME_ROOT)
         message(FATAL_ERROR "ONNXRUNTIME_ROOT is required for the CPU inference backend")
     endif()
     get_filename_component(ONNXRUNTIME_ROOT "${ONNXRUNTIME_ROOT}" ABSOLUTE)
+    if(UNIX)
+        # Linux Fase 1: upstream onnxruntime-linux-x64-1.25.0 layout
+        # (include/ + lib/libonnxruntime.so); provisioned by
+        # .github/workflows/linux-build.yml under .tools/native/.
+        if(NOT EXISTS "${ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h")
+            message(FATAL_ERROR
+                "ONNXRUNTIME_ROOT must contain the Linux ONNX Runtime 1.25.0 include/ files")
+        endif()
+        file(GLOB CUAJONE_ORT_LINUX_SO "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so*")
+        if(NOT CUAJONE_ORT_LINUX_SO)
+            message(FATAL_ERROR
+                "ONNXRUNTIME_ROOT must contain the Linux ONNX Runtime 1.25.0 lib/libonnxruntime.so files")
+        endif()
+        add_library(cuajone_onnxruntime SHARED IMPORTED)
+        set_target_properties(cuajone_onnxruntime PROPERTIES
+            IMPORTED_LOCATION "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so"
+            INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_ROOT}/include")
+        # Build-tree RPATH so the CLI and tests find the ORT .so without an
+        # install step or LD_LIBRARY_PATH.
+        set(CUAJONE_ORT_RPATH "${ONNXRUNTIME_ROOT}/lib")
+    else()
     if(NOT EXISTS "${ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h"
         OR NOT EXISTS "${ONNXRUNTIME_ROOT}/lib/onnxruntime.lib"
         OR NOT EXISTS "${ONNXRUNTIME_ROOT}/lib/onnxruntime.dll")
@@ -348,6 +377,7 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
         IMPORTED_IMPLIB "${ONNXRUNTIME_ROOT}/lib/onnxruntime.lib"
         IMPORTED_LOCATION "${ONNXRUNTIME_ROOT}/lib/onnxruntime.dll"
         INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_ROOT}/include")
+    endif()
 
     if(CUAJONE_ENABLE_TENSORRT)
         get_filename_component(TENSORRT_ROOT "${TENSORRT_ROOT}" ABSOLUTE)
@@ -396,7 +426,7 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
             set(CUAJONE_CUDART_TARGET CUDA::cudart)
         endif()
     endif()
-    find_package(OpenCV 4.8 REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui)
+    find_package(OpenCV ${CUAJONE_OPENCV_MIN_VERSION} REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui)
 
     add_library(cuajone_runtime
         src/runtime/capture.cpp
@@ -409,9 +439,13 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
     target_link_libraries(cuajone_runtime
         PUBLIC cuajone_core
         PRIVATE cuajone_onnxruntime
-            bcrypt
-            ws2_32
             opencv_imgcodecs opencv_videoio opencv_highgui)
+    if(WIN32)
+        target_link_libraries(cuajone_runtime PRIVATE bcrypt ws2_32)
+    else()
+        # dlopen/dlsym for the Linux CUDA Driver API probe (compute.cpp).
+        target_link_libraries(cuajone_runtime PRIVATE ${CMAKE_DL_LIBS})
+    endif()
     if(CUAJONE_ENABLE_TENSORRT)
         target_sources(cuajone_runtime PRIVATE src/runtime/tensorrt_runtime.cpp)
         target_include_directories(cuajone_runtime PRIVATE "${TENSORRT_INCLUDE_DIR}")
@@ -419,7 +453,11 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
         target_link_libraries(cuajone_runtime PRIVATE "${TENSORRT_NVINFER_LIBRARY}")
         target_compile_definitions(cuajone_runtime PRIVATE CUAJONE_WITH_TENSORRT=1)
     endif()
-    target_compile_options(cuajone_runtime PRIVATE /W4 /permissive- /EHsc)
+    if(MSVC)
+        target_compile_options(cuajone_runtime PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(cuajone_runtime PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
     if(CUAJONE_ENABLE_INTERNAL_DIAGNOSTICS)
         target_compile_definitions(cuajone_runtime PUBLIC CUAJONE_INTERNAL_DIAGNOSTICS=1)
     endif()
@@ -427,6 +465,7 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
     if(TARGET cuajone_python)
         target_compile_definitions(cuajone_python PRIVATE CUAJONE_PYTHON_WITH_ENGINE_RUNTIME=1)
         target_link_libraries(cuajone_python PRIVATE cuajone_runtime)
+        if(WIN32)
         add_custom_command(TARGET cuajone_python POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:cuajone_onnxruntime>
@@ -437,14 +476,27 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
                 "/DELAYLOAD:cudart64_12.dll"
                 "/DELAYLOAD:nvinfer_11.dll")
         endif()
+        endif()
     endif()
 
+    if(WIN32)
     add_executable(cuajone_native src/app/main.cpp "${CUAJONE_PRODUCT_RESOURCE}")
     add_dependencies(cuajone_native cuajone_product_icon)
+    else()
+        # Linux Fase 1: CLI without the Win32 icon resource; no launcher (Fase 2).
+        add_executable(cuajone_native src/app/main.cpp)
+        set_target_properties(cuajone_native PROPERTIES
+            BUILD_RPATH "${CUAJONE_ORT_RPATH}")
+    endif()
     target_link_libraries(cuajone_native PRIVATE cuajone_runtime)
-    target_compile_options(cuajone_native PRIVATE /W4 /permissive- /EHsc /utf-8)
+    if(MSVC)
+        target_compile_options(cuajone_native PRIVATE /W4 /permissive- /EHsc /utf-8)
+    else()
+        target_compile_options(cuajone_native PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
     set_target_properties(cuajone_native PROPERTIES
         OUTPUT_NAME "${CUAJONE_PRODUCT_EXE}")
+    if(WIN32)
     add_custom_command(TARGET cuajone_native POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:cuajone_onnxruntime>
@@ -478,7 +530,9 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
             "/DELAYLOAD:cudart64_12.dll"
             "/DELAYLOAD:nvinfer_11.dll")
     endif()
+    endif()
 
+    if(WIN32)
     add_library(cuajone_installer_ca SHARED
         src/foundation/compute.cpp
         src/installer/installer_custom_action.cpp
@@ -489,27 +543,48 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
     set_target_properties(cuajone_installer_ca PROPERTIES
         OUTPUT_NAME CuajoneHardwareProbeCA
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
 
     if(CUAJONE_BUILD_TESTS)
+        if(MSVC)
+            set(CUAJONE_TEST_COMPILE_OPTIONS /W4 /permissive- /EHsc)
+        else()
+            set(CUAJONE_TEST_COMPILE_OPTIONS -Wall -Wextra -Wpedantic)
+        endif()
         add_executable(cuajone_evidence_tests tests/evidence_tests.cpp)
         target_link_libraries(cuajone_evidence_tests PRIVATE cuajone_runtime)
-        target_compile_options(cuajone_evidence_tests PRIVATE /W4 /permissive- /EHsc)
+        target_compile_options(cuajone_evidence_tests PRIVATE ${CUAJONE_TEST_COMPILE_OPTIONS})
         add_test(NAME cuajone_evidence_tests COMMAND cuajone_evidence_tests)
+        if(WIN32)
         set_tests_properties(cuajone_evidence_tests PROPERTIES
             ENVIRONMENT_MODIFICATION
                 "PATH=path_list_prepend:$<TARGET_FILE_DIR:opencv_core>;PATH=path_list_prepend:${ONNXRUNTIME_ROOT}/lib")
+        else()
+            # Linux Fase 1: resolve the ORT .so via build-tree RPATH.
+            set_target_properties(cuajone_evidence_tests PROPERTIES
+                BUILD_RPATH "${CUAJONE_ORT_RPATH}")
+        endif()
 
         add_executable(cuajone_capture_diagnostics_tests tests/capture_diagnostics_tests.cpp)
-        target_link_libraries(cuajone_capture_diagnostics_tests PRIVATE cuajone_runtime ws2_32)
-        target_compile_options(cuajone_capture_diagnostics_tests PRIVATE /W4 /permissive- /EHsc)
+        target_link_libraries(cuajone_capture_diagnostics_tests PRIVATE cuajone_runtime)
+        if(WIN32)
+            target_link_libraries(cuajone_capture_diagnostics_tests PRIVATE ws2_32)
+        endif()
+        target_compile_options(cuajone_capture_diagnostics_tests PRIVATE ${CUAJONE_TEST_COMPILE_OPTIONS})
         add_test(NAME cuajone_capture_diagnostics_tests COMMAND cuajone_capture_diagnostics_tests)
+        if(WIN32)
         set_tests_properties(cuajone_capture_diagnostics_tests PROPERTIES
             ENVIRONMENT_MODIFICATION
                 "PATH=path_list_prepend:$<TARGET_FILE_DIR:opencv_core>;PATH=path_list_prepend:${ONNXRUNTIME_ROOT}/lib")
+        else()
+            set_target_properties(cuajone_capture_diagnostics_tests PROPERTIES
+                BUILD_RPATH "${CUAJONE_ORT_RPATH}")
+        endif()
 
         add_executable(cuajone_onnx_tests tests/onnx_tests.cpp)
         target_link_libraries(cuajone_onnx_tests PRIVATE cuajone_runtime)
-        target_compile_options(cuajone_onnx_tests PRIVATE /W4 /permissive- /EHsc)
+        target_compile_options(cuajone_onnx_tests PRIVATE ${CUAJONE_TEST_COMPILE_OPTIONS})
+        if(WIN32)
         add_custom_command(TARGET cuajone_onnx_tests POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:cuajone_onnxruntime>
@@ -518,8 +593,16 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
         set_tests_properties(cuajone_onnx_tests PROPERTIES
             ENVIRONMENT_MODIFICATION
                 "PATH=path_list_prepend:$<TARGET_FILE_DIR:opencv_core>;PATH=path_list_prepend:${ONNXRUNTIME_ROOT}/lib")
+        else()
+            set_target_properties(cuajone_onnx_tests PROPERTIES
+                BUILD_RPATH "${CUAJONE_ORT_RPATH}")
+            add_test(NAME cuajone_onnx_tests COMMAND cuajone_onnx_tests)
+        endif()
     endif()
 
+    # Opt-in GPU integration tests stay Windows-only until the Fase 3 Linux
+    # CUDA/TensorRT backends (dumpbin closure copy, DELAYLOAD, TRT headers).
+    if(NOT UNIX)
     if(CUAJONE_ENABLE_TRT_INTEGRATION_TESTS AND CUAJONE_ENABLE_TENSORRT)
         set(CUAJONE_TEST_ENGINE "" CACHE FILEPATH "Engine used by the opt-in TensorRT smoke test")
         if(NOT EXISTS "${CUAJONE_TEST_ENGINE}")
@@ -548,7 +631,9 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
             COMMAND cuajone_trt_pipeline_parity
                 "${CUAJONE_TEST_ENGINE}" "${CUAJONE_TEST_POSE_ENGINE}" "${CUAJONE_TEST_PERSON_IMAGE}")
     endif()
+    endif()
 
+    if(NOT UNIX)
     if(CUAJONE_ENABLE_ONNX_CUDA_INTEGRATION_TESTS)
         unset(CUAJONE_ONNX_CUDA_RUNTIME_DIR CACHE)
         set(CUAJONE_ONNX_CUDA_DEPENDENCY_ROOTS "" CACHE STRING
@@ -629,5 +714,6 @@ if(CUAJONE_BUILD_RUNTIME AND NOT UNIX)
             LABELS "gpu;onnx;acceptance;ppe-cuda")
         set_tests_properties(cuajone_onnx_cuda_hybrid_pipeline_tests PROPERTIES
             LABELS "gpu;onnx;acceptance;hybrid;ppe-cuda;pose-cpu;known-pose-cuda-access-violation")
+    endif()
     endif()
 endif()

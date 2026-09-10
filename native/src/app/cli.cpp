@@ -129,8 +129,9 @@ RtspTransport parseRtspTransport(std::string_view text) {
 VideoAcceleration parseVideoAcceleration(std::string_view text) {
     if (text == "auto") return VideoAcceleration::Auto;
     if (text == "d3d11") return VideoAcceleration::D3d11;
+    if (text == "vaapi") return VideoAcceleration::Vaapi;
     if (text == "cpu") return VideoAcceleration::Cpu;
-    throw std::invalid_argument("--video-acceleration must be auto, d3d11, or cpu");
+    throw std::invalid_argument("--video-acceleration must be auto, d3d11, vaapi, or cpu");
 }
 
 AnalyticsMode parseAnalyticsMode(std::string_view text) {
@@ -473,7 +474,7 @@ void printHelp(std::ostream& output) {
         "  --device <index>             CUDA device index (default: first compatible)\n"
         "  --source-label <label>       Unique label for the preceding --source\n"
         "  --source-rtsp-transport <mode> Per-source default, tcp, or udp\n"
-        "  --source-video-acceleration <mode> Per-source auto, d3d11, or cpu\n"
+        "  --source-video-acceleration <mode> Per-source auto, d3d11, vaapi, or cpu\n"
         "  --ppe-labels <a,b,c>         Class labels for a raw engine without metadata\n"
         "  --pose-class-count <number>  Pose classes fallback (default: 1)\n"
         "  --pose-kpt-shape <count,dim> Pose schema fallback (default: 17,3)\n"
@@ -497,7 +498,7 @@ void printHelp(std::ostream& output) {
         "  --show                       Display the annotated OpenCV window\n\n"
         "Capture and RTSP:\n"
         "  --rtsp-transport <mode>      default, tcp, or udp (default: tcp)\n"
-        "  --video-acceleration <mode> auto, d3d11, or cpu (default: auto)\n"
+        "  --video-acceleration <mode> auto, d3d11, vaapi, or cpu (default: auto)\n"
         "  --reconnect-delay <seconds>  Non-negative initial delay (default: 5)\n"
         "  --max-reconnect-delay <sec>  At least reconnect delay (default: 30)\n"
         "  --capture-open-timeout-ms <n> Non-negative FFmpeg open timeout (default: 20000)\n"

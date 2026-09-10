@@ -493,6 +493,10 @@ void testCliUrlsAndInvariantDefense() {
             && defaults.ppe_confidence == 0.10F
             && defaults.ppe_class_confidences[0] == 0.10F,
         "Stable capture and asynchronous evidence defaults changed");
+    auto vaapi = base;
+    vaapi.insert(vaapi.end(), {"--video-acceleration", "vaapi"});
+    require(parse(vaapi).video_acceleration == VideoAcceleration::Vaapi,
+        "CLI did not preserve the vaapi video acceleration");
     auto multiple_sources = base;
     multiple_sources.insert(multiple_sources.begin() + 3, {
         "--source-label", "CAM_01", "--source-rtsp-transport", "tcp",

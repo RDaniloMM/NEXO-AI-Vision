@@ -11,6 +11,11 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <dxgi.h>
+#else
+#include <dlfcn.h>
+
+#include <cstdlib>
+#include <fstream>
 #endif
 
 namespace cuajone {
@@ -56,6 +61,18 @@ std::string utf8(const wchar_t* value) {
 template <typename Function>
 Function cudaFunction(HMODULE module, const char* name) {
     return reinterpret_cast<Function>(GetProcAddress(module, name));
+}
+#else
+
+template <typename Function>
+Function cudaFunction(void* module, const char* name) {
+    return reinterpret_cast<Function>(dlsym(module, name));
+}
+
+std::string_view trimAsciiWhitespace(std::string_view value) {
+    const std::size_t first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) return {};
+    return value.substr(first, value.find_last_not_of(" \t\r\n") - first + 1);
 }
 #endif
 
@@ -207,8 +224,89 @@ HardwareProbeResult probeHardware() {
     result.status = HardwareProbeStatus::CudaReady;
     result.detail = "NVIDIA adapter and CUDA Driver API are ready";
 #else
-    result.status = HardwareProbeStatus::ProbeError;
-    result.detail = "Hardware probing is supported only on Windows";
+    // Linux Fase 1: probe the NVIDIA driver directly with dlopen instead of
+    // DXGI (no display-adapter enumeration and no NVML dependency; the Driver
+    // API surface used here is stable across driver releases). Thresholds and
+    // status semantics match the Windows branch above.
+    result.driver_was_loaded = [] {
+        void* preloaded = dlopen("libcuda.so.1", RTLD_NOW | RTLD_NOLOAD);
+        if (preloaded == nullptr) return false;
+        dlclose(preloaded);
+        return true;
+    }();
+    void* cuda = dlopen("libcuda.so.1", RTLD_NOW);
+    if (cuda == nullptr) {
+        result.status = HardwareProbeStatus::DriverUnavailable;
+        result.detail = "libcuda.so.1 is unavailable";
+        return result;
+    }
+    using CuInit = int(*)(unsigned int);
+    using CuDriverGetVersion = int(*)(int*);
+    using CuDeviceGetCount = int(*)(int*);
+    using CuDeviceGetName = int(*)(char*, int, int);
+    using CuDeviceComputeCapability = int(*)(int*, int*, int);
+    const auto cu_init = cudaFunction<CuInit>(cuda, "cuInit");
+    const auto cu_driver_get_version = cudaFunction<CuDriverGetVersion>(cuda, "cuDriverGetVersion");
+    const auto cu_device_get_count = cudaFunction<CuDeviceGetCount>(cuda, "cuDeviceGetCount");
+    const auto cu_device_get_name = cudaFunction<CuDeviceGetName>(cuda, "cuDeviceGetName");
+    const auto cu_device_compute_capability = cudaFunction<CuDeviceComputeCapability>(cuda, "cuDeviceComputeCapability");
+    if (!cu_init || !cu_driver_get_version || !cu_device_get_count
+        || !cu_device_get_name || !cu_device_compute_capability) {
+        dlclose(cuda);
+        result.status = HardwareProbeStatus::ProbeError;
+        result.detail = "libcuda.so.1 does not expose the required CUDA Driver API";
+        return result;
+    }
+    if (cu_init(0) != 0) {
+        dlclose(cuda);
+        result.status = HardwareProbeStatus::DriverUnavailable;
+        result.detail = "CUDA Driver API initialization failed";
+        return result;
+    }
+    int driver_version{};
+    if (cu_driver_get_version(&driver_version) != 0) {
+        dlclose(cuda);
+        result.status = HardwareProbeStatus::ProbeError;
+        result.detail = "CUDA Driver API version query failed";
+        return result;
+    }
+    result.driver_version = driver_version;
+    if (driver_version < kMinimumCudaDriverApiVersion) {
+        dlclose(cuda);
+        result.status = HardwareProbeStatus::DriverTooOld;
+        result.detail = "CUDA Driver API 12.9 or newer is required";
+        return result;
+    }
+    int device_count{};
+    if (cu_device_get_count(&device_count) != 0 || device_count <= 0) {
+        dlclose(cuda);
+        result.status = HardwareProbeStatus::DriverUnavailable;
+        result.detail = "CUDA Driver API found no usable device";
+        return result;
+    }
+    bool compatible_device = false;
+    for (int device = 0; device < device_count; ++device) {
+        char name[256]{};
+        int major{};
+        int minor{};
+        if (cu_device_get_name(name, static_cast<int>(sizeof(name)), device) != 0
+            || cu_device_compute_capability(&major, &minor, device) != 0) {
+            dlclose(cuda);
+            result.status = HardwareProbeStatus::ProbeError;
+            result.detail = "CUDA device capability query failed";
+            return result;
+        }
+        result.cuda_devices.push_back({device, name, major, minor});
+        compatible_device = compatible_device || isTensorRtCompatibleComputeCapability(major, minor);
+    }
+    dlclose(cuda);
+    if (!compatible_device) {
+        result.status = HardwareProbeStatus::DriverUnavailable;
+        result.detail = "CUDA initialized, but TensorRT 11 requires compute capability SM 7.5 or newer";
+        return result;
+    }
+    result.status = HardwareProbeStatus::CudaReady;
+    result.detail = "NVIDIA driver and CUDA Driver API are ready";
 #endif
     return result;
 }
@@ -378,6 +476,29 @@ std::optional<ComputeBackend> installedComputeBackend() {
     if (const auto current = read(L"SOFTWARE\\NexoAI Vision")) return current;
     return read(L"SOFTWARE\\Cuajone PPE Monitor");
 #else
+    // Linux Fase 1: NEXOAI_COMPUTE_MODE wins when set; otherwise parse the
+    // ComputeMode=<auto|cuda|cpu> line of /etc/nexoai-vision/config. Absent
+    // file and variable mean an unmanaged install (nullopt, same as a
+    // registry-less Windows machine). A malformed value throws via
+    // parseComputeBackend, matching CLI validation.
+    if (const char* override = std::getenv("NEXOAI_COMPUTE_MODE");
+        override != nullptr && trimAsciiWhitespace(override) != "") {
+        return parseComputeBackend(trimAsciiWhitespace(override));
+    }
+    std::ifstream config("/etc/nexoai-vision/config");
+    if (!config) return std::nullopt;
+    std::string line;
+    while (std::getline(config, line)) {
+        const std::string_view trimmed = trimAsciiWhitespace(line);
+        if (trimmed.empty() || trimmed.front() == '#') continue;
+        constexpr std::string_view kKey{"ComputeMode"};
+        if (trimmed.size() <= kKey.size() || trimmed.substr(0, kKey.size()) != kKey) continue;
+        const std::string_view value = trimAsciiWhitespace(trimmed.substr(kKey.size()));
+        if (value.empty() || value.front() != '=') continue;
+        const std::string_view mode = trimAsciiWhitespace(value.substr(1));
+        if (mode.empty()) continue;
+        return parseComputeBackend(mode);
+    }
     return std::nullopt;
 #endif
 }

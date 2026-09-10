@@ -23,7 +23,7 @@
     },
     {
       "name": "linux-release",
-      "displayName": "Linux portable core + cpu_tests (Fase 0, no runtime/launcher)",
+      "displayName": "Linux runtime CLI + tests (Fase 1: POSIX runtime, no launcher)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/../.tools/native/build/presets/linux-release",
       "cacheVariables": {
@@ -34,7 +34,7 @@
         "CUAJONE_BUILD_TESTS": "ON",
         "CUAJONE_BUILD_LAUNCHER": "OFF",
         "CUAJONE_ENABLE_TENSORRT": "OFF",
-        "ONNXRUNTIME_ROOT": "",
+        "ONNXRUNTIME_ROOT": "$env{ONNXRUNTIME_ROOT}",
         "OpenCV_DIR": "",
         "TENSORRT_ROOT": ""
       }
