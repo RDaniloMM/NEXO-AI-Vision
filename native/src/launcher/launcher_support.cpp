@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #include "cuajone/launcher_support.hpp"
-
-#define NOMINMAX
+#include "platform_paths.hpp"
 
 #include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <cwctype>
 #include <fstream>
 #include <iomanip>
 #include <map>
 #include <sstream>
-#include <windows.h>
 #include <stdexcept>
 
 namespace cuajone::launcher {
@@ -42,17 +41,7 @@ bool regularFileWithExtension(
 }
 
 std::wstring wideFromUtf8(std::string_view value) {
-    if (value.empty()) return {};
-    const int required = MultiByteToWideChar(
-        CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
-    if (required <= 0) throw std::invalid_argument("Preferences are not valid UTF-8");
-    std::wstring result(static_cast<std::size_t>(required), L'\0');
-    if (MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
-            result.data(), required) <= 0) {
-        throw std::invalid_argument("Preferences are not valid UTF-8");
-    }
-    return result;
+    return platform::wideFromUtf8(value);
 }
 
 bool isRtspSource(std::wstring_view source) {
@@ -229,6 +218,7 @@ std::string serializeCameraConnectionProfile(const CameraConnectionProfile& prof
     const auto transport = profile.transport == RtspTransport::Udp ? "udp"
         : profile.transport == RtspTransport::Default ? "default" : "tcp";
     const auto acceleration = profile.video_acceleration == VideoAcceleration::D3d11 ? "d3d11"
+        : profile.video_acceleration == VideoAcceleration::Vaapi ? "vaapi"
         : profile.video_acceleration == VideoAcceleration::Cpu ? "cpu" : "auto";
     std::ostringstream output;
     output << "schema_version=1\n"
@@ -290,8 +280,9 @@ CameraConnectionProfile parseCameraConnectionProfile(std::string_view payload, s
     if (transport != "tcp" && transport != "udp" && transport != "default") throw std::invalid_argument("Invalid profile transport");
     const auto& acceleration = values.at("video_acceleration");
     profile.video_acceleration = acceleration == "d3d11" ? VideoAcceleration::D3d11
+        : acceleration == "vaapi" ? VideoAcceleration::Vaapi
         : acceleration == "cpu" ? VideoAcceleration::Cpu : VideoAcceleration::Auto;
-    if (acceleration != "auto" && acceleration != "d3d11" && acceleration != "cpu") throw std::invalid_argument("Invalid profile video acceleration");
+    if (acceleration != "auto" && acceleration != "d3d11" && acceleration != "vaapi" && acceleration != "cpu") throw std::invalid_argument("Invalid profile video acceleration");
     validateCameraConnectionProfile(profile);
     return profile;
 }
@@ -419,16 +410,7 @@ std::wstring configuredRtspSource(
 }
 
 std::string utf8FromWide(std::wstring_view value) {
-    if (value.empty()) return {};
-    const int required = WideCharToMultiByte(
-        CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
-    if (required <= 0) return {};
-    std::string result(static_cast<std::size_t>(required), '\0');
-    const int written = WideCharToMultiByte(
-        CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
-        result.data(), required, nullptr, nullptr);
-    if (written <= 0) return {};
-    return result;
+    return platform::utf8FromWide(value);
 }
 
 void appendOption(
@@ -488,15 +470,6 @@ std::filesystem::path findRepoRoot(const std::filesystem::path& start) {
     return {};
 }
 
-std::filesystem::path launcherModuleDir() {
-    std::wstring module_path(32768, L'\0');
-    const DWORD length = GetModuleFileNameW(
-        nullptr, module_path.data(), static_cast<DWORD>(module_path.size()));
-    if (length == 0 || length == static_cast<DWORD>(module_path.size())) return {};
-    module_path.resize(length);
-    return std::filesystem::path(module_path).parent_path();
-}
-
 }  // namespace
 
 std::vector<std::filesystem::path> managedModelRootCandidates(
@@ -506,7 +479,7 @@ std::vector<std::filesystem::path> managedModelRootCandidates(
     appendCandidateOnce(candidates, configured_root);
 
     std::filesystem::path executable_dir = exe_dir;
-    if (executable_dir.empty()) executable_dir = launcherModuleDir();
+    if (executable_dir.empty()) executable_dir = platform::executableDirectory();
     appendCandidateOnce(candidates, executable_dir);
     if (!executable_dir.empty()) {
         appendCandidateOnce(candidates, executable_dir / L"models");
@@ -527,12 +500,9 @@ std::vector<std::filesystem::path> managedModelRootCandidates(
         appendCandidateOnce(
             candidates, repo_root / L".tools" / L"native" / L"installer" / L"stage" / L"models");
     }
-    appendCandidateOnce(
-        candidates,
-        std::filesystem::path(L"C:\\Program Files\\NexoAI Vision\\bin\\models"));
-    appendCandidateOnce(
-        candidates,
-        std::filesystem::path(L"C:\\Program Files\\NexoAI Vision\\models"));
+    for (const auto& candidate : platform::modelRootCandidates({}, executable_dir)) {
+        appendCandidateOnce(candidates, candidate);
+    }
     return candidates;
 }
 
@@ -727,6 +697,7 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
             : camera.transport == RtspTransport::Default ? L"default" : L"tcp");
         result.arguments.emplace_back(L"--source-video-acceleration");
         result.arguments.emplace_back(camera.video_acceleration == VideoAcceleration::D3d11 ? L"d3d11"
+            : camera.video_acceleration == VideoAcceleration::Vaapi ? L"vaapi"
             : camera.video_acceleration == VideoAcceleration::Cpu ? L"cpu" : L"auto");
     }
     appendOption(result.arguments, L"--output", settings.output);
@@ -748,6 +719,7 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
     switch (settings.video_acceleration) {
         case VideoAcceleration::Auto: result.arguments.emplace_back(L"auto"); break;
         case VideoAcceleration::D3d11: result.arguments.emplace_back(L"d3d11"); break;
+        case VideoAcceleration::Vaapi: result.arguments.emplace_back(L"vaapi"); break;
         case VideoAcceleration::Cpu: result.arguments.emplace_back(L"cpu"); break;
     }
     result.arguments.emplace_back(L"--imgsz");
@@ -893,8 +865,9 @@ OperatorPreferences parseOperatorPreferences(std::string_view text) {
     if (const auto acceleration = values.find("video_acceleration"); acceleration != values.end()) {
         if (acceleration->second == "auto") result.video_acceleration = VideoAcceleration::Auto;
         else if (acceleration->second == "d3d11") result.video_acceleration = VideoAcceleration::D3d11;
+        else if (acceleration->second == "vaapi") result.video_acceleration = VideoAcceleration::Vaapi;
         else if (acceleration->second == "cpu") result.video_acceleration = VideoAcceleration::Cpu;
-        else throw std::invalid_argument("Preferences video_acceleration must be auto, d3d11, or cpu");
+        else throw std::invalid_argument("Preferences video_acceleration must be auto, d3d11, vaapi, or cpu");
     }
     if (const auto resolution = values.find("stream_resolution"); resolution != values.end()) {
         result.stream_resolution = wideFromUtf8(resolution->second);
@@ -927,8 +900,9 @@ std::string serializeOperatorPreferences(const OperatorPreferences& preferences)
            << (preferences.rtsp_transport == RtspTransport::Tcp ? "tcp"
                : preferences.rtsp_transport == RtspTransport::Udp ? "udp" : "default") << '\n'
            << "video_acceleration="
-           << (preferences.video_acceleration == VideoAcceleration::D3d11 ? "d3d11"
-               : preferences.video_acceleration == VideoAcceleration::Cpu ? "cpu" : "auto") << '\n'
+            << (preferences.video_acceleration == VideoAcceleration::D3d11 ? "d3d11"
+                : preferences.video_acceleration == VideoAcceleration::Vaapi ? "vaapi"
+                : preferences.video_acceleration == VideoAcceleration::Cpu ? "cpu" : "auto") << '\n'
            << "stream_resolution="
            << utf8FromWide(preferences.stream_resolution) << '\n'
            << "stream_fps=" << preferences.stream_fps << '\n'
@@ -978,13 +952,7 @@ void saveOperatorPreferencesAtomic(
         output.flush();
         if (!output) throw std::runtime_error("Could not write operator preferences");
     }
-    if (!MoveFileExW(
-            temporary.c_str(), path.c_str(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        std::error_code ignored;
-        std::filesystem::remove(temporary, ignored);
-        throw std::runtime_error("Could not atomically replace operator preferences");
-    }
+    platform::atomicReplaceFile(temporary, path);
 }
 
 std::vector<std::string_view> visibleLauncherControlKeys() {

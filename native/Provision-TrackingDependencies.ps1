@@ -19,8 +19,24 @@ if ($fullToolRoot -cne [System.IO.Path]::GetFullPath($localToolRoot).TrimEnd('\'
 $downloadRoot = Join-Path $ToolRoot "downloads"
 $dependencyRoot = Join-Path $ToolRoot "dependencies"
 $temporaryRoot = Join-Path $ToolRoot "temp\tracking-dependencies"
-$byteTrackCommit = "a865158906f6138465668810a98ffd918d95f9a3"
-$eigenCommit = "3147391d946bb4b6c68edd901f2add6ac1f31f8c"
+$dependencyLockPath = Join-Path $PSScriptRoot "..\installer\linux\dependency-lock.env"
+if (-not (Test-Path -LiteralPath $dependencyLockPath -PathType Leaf)) {
+    throw "Native dependency lock was not found: $dependencyLockPath"
+}
+$dependencyLock = @{}
+foreach ($line in Get-Content -LiteralPath $dependencyLockPath) {
+    if ($line -match '^([A-Z_]+)=(.*)$') {
+        $dependencyLock[$matches[1]] = $matches[2]
+    }
+}
+foreach ($requiredName in @("BYTE_TRACK_COMMIT", "BYTE_TRACK_SHA256", "EIGEN_COMMIT", "EIGEN_SHA256")) {
+    if (-not $dependencyLock.ContainsKey($requiredName) -or
+        [string]::IsNullOrWhiteSpace($dependencyLock[$requiredName])) {
+        throw "Native dependency lock value is missing: $requiredName"
+    }
+}
+$byteTrackCommit = $dependencyLock["BYTE_TRACK_COMMIT"]
+$eigenCommit = $dependencyLock["EIGEN_COMMIT"]
 $byteTrackArchive = Join-Path $downloadRoot "byte-track-eigen-$byteTrackCommit.zip"
 $eigenArchive = Join-Path $downloadRoot "eigen-$eigenCommit.zip"
 $byteTrackTarget = Join-Path $dependencyRoot "byte-track-eigen-$byteTrackCommit"
@@ -104,12 +120,12 @@ if (-not (Test-Path -LiteralPath $patchPath -PathType Leaf)) {
 Get-VerifiedArchive `
     "https://codeload.github.com/cj-mills/byte-track-eigen/zip/$byteTrackCommit" `
     $byteTrackArchive `
-    "e5a075df5e8b4ed4bb7436ffe7fe0f4cee5c6a6663112d6a1c47a99ffb704d88" `
+    $dependencyLock["BYTE_TRACK_SHA256"] `
     "ByteTrack-Eigen 2.1.0"
 Get-VerifiedArchive `
     "https://gitlab.com/libeigen/eigen/-/archive/$eigenCommit/eigen-$eigenCommit.zip" `
     $eigenArchive `
-    "9eec4ec4e5e459b2f59dbbaa4280e1bb3ee61cccd8a7c0af0321d29d95fece9e" `
+    $dependencyLock["EIGEN_SHA256"] `
     "Eigen 3.4.0"
 
 Expand-VerifiedDependency `

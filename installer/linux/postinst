@@ -1,0 +1,28 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+set -eu
+
+case "${1:-configure}" in
+    configure|abort-upgrade|abort-remove|abort-deconfigure) ;;
+    *) exit 0 ;;
+esac
+
+config_dir=/etc/nexoai-vision
+config_file=${config_dir}/config
+install -d -m 0755 "$config_dir"
+if [ ! -e "$config_file" ]; then
+    printf '%s\n' '# Nexo AI Vision Linux runtime configuration.' 'ComputeMode=auto' > "$config_file"
+    chmod 0644 "$config_file"
+fi
+
+# Installation never compiles engines or changes drivers. Operators may opt in
+# to a bounded, read-only hardware probe after installation.
+if [ "${NEXOAI_VALIDATE_HARDWARE:-0}" = 1 ] && [ -x /opt/nexoai-vision/bin/NexoAIVision ]; then
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 10 /opt/nexoai-vision/bin/NexoAIVision --hardware-probe-json >/dev/null || true
+    else
+        /opt/nexoai-vision/bin/NexoAIVision --hardware-probe-json >/dev/null || true
+    fi
+fi
+
+exit 0

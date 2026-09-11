@@ -6,7 +6,11 @@ project(NexoAIVision LANGUAGES CXX)
 
 option(CUAJONE_BUILD_RUNTIME "Build the Windows native runtime" ON)
 option(CUAJONE_BUILD_TESTS "Build pure CPU unit tests" ON)
-option(CUAJONE_BUILD_LAUNCHER "Build the Windows GUI launcher" ON)
+option(CUAJONE_BUILD_LAUNCHER "Build the legacy native launcher fallback" ON)
+option(CUAJONE_BUILD_QT_LAUNCHER "Build the Qt6 launcher on Windows and UNIX" OFF)
+option(CUAJONE_BUILD_QT_VIEWER "Build the Qt6 live analytics viewer on Windows and UNIX" OFF)
+option(CUAJONE_USE_QT "Prefer the Qt6 launcher and viewer when Qt6 is available" OFF)
+option(CUAJONE_REQUIRE_QT "Fail when an explicitly requested Qt package build cannot find Qt6" OFF)
 option(CUAJONE_BUILD_PYTHON_BINDINGS "Build the development/QA pybind11 module" OFF)
 option(CUAJONE_ENABLE_TENSORRT "Enable the optional TensorRT/CUDA backend" ON)
 option(CUAJONE_ENABLE_TRT_INTEGRATION_TESTS "Build opt-in TensorRT integration tests" OFF)
@@ -25,13 +29,99 @@ set(CUAJONE_FILE_VERSION "" CACHE STRING
     "Launcher numeric version; must match installer -FileVersion. Empty means development build")
 set(CUAJONE_PRODUCT_VERSION "" CACHE STRING
     "Launcher product label shown in About; may include a prerelease suffix")
+set(CUAJONE_PACKAGE_VERSION "" CACHE STRING
+    "Canonical package version (major.minor.patch); derived from product version when empty")
 include(cmake/LauncherVersion.cmake)
+
+if(CUAJONE_USE_QT)
+    set(CUAJONE_BUILD_QT_LAUNCHER ON CACHE BOOL "Build the Qt6 launcher on Windows and UNIX" FORCE)
+    set(CUAJONE_BUILD_QT_VIEWER ON CACHE BOOL "Build the Qt6 live analytics viewer on Windows and UNIX" FORCE)
+endif()
+
+if(CUAJONE_PRODUCT_VERSION STREQUAL "")
+    set(CUAJONE_VERSION_DISPLAY "0.0.0.0-dev")
+else()
+    set(CUAJONE_VERSION_DISPLAY "${CUAJONE_PRODUCT_VERSION}")
+endif()
+
+add_library(cuajone_platform STATIC
+    src/platform/platform_paths.cpp
+    src/platform/platform_secrets.cpp
+    src/platform/platform_process.cpp)
+target_include_directories(cuajone_platform PUBLIC src/platform)
+target_compile_features(cuajone_platform PUBLIC cxx_std_20)
+if(WIN32)
+    target_sources(cuajone_platform PRIVATE
+        src/platform/windows/platform_paths.cpp
+        src/platform/windows/platform_secrets.cpp
+        src/platform/windows/platform_process.cpp)
+    target_link_libraries(cuajone_platform PUBLIC advapi32 ole32 shell32)
+else()
+    target_sources(cuajone_platform PRIVATE
+        src/platform/linux/platform_paths.cpp
+        src/platform/linux/platform_secrets.cpp
+        src/platform/linux/platform_process.cpp)
+endif()
 
 set(CUAJONE_RESVG_EXE
     "${CMAKE_CURRENT_SOURCE_DIR}/../.tools/native/dependencies/resvg-0.47.0/resvg.exe"
     CACHE FILEPATH "Verified resvg 0.47.0 CLI used to rasterize the product SVG icon")
 
-if(WIN32 AND (CUAJONE_BUILD_LAUNCHER OR CUAJONE_BUILD_RUNTIME))
+set(CUAJONE_QT_AVAILABLE OFF)
+if(CUAJONE_BUILD_QT_LAUNCHER OR CUAJONE_BUILD_QT_VIEWER)
+    find_package(Qt6 QUIET COMPONENTS Widgets Gui)
+    if(Qt6_FOUND)
+        set(CUAJONE_QT_AVAILABLE ON)
+    elseif(CUAJONE_REQUIRE_QT)
+        message(FATAL_ERROR "Qt6 Widgets/Gui are required for this Qt build")
+    else()
+        message(STATUS "Qt6 Widgets/Gui not found; requested Qt targets are disabled")
+        set(CUAJONE_BUILD_QT_LAUNCHER OFF)
+        set(CUAJONE_BUILD_QT_VIEWER OFF)
+    endif()
+endif()
+
+if(CUAJONE_BUILD_QT_LAUNCHER)
+    if(NOT TARGET cuajone_launcher_support)
+        add_library(cuajone_launcher_support
+            src/launcher/launcher_support.cpp)
+        target_include_directories(cuajone_launcher_support PUBLIC include)
+        target_link_libraries(cuajone_launcher_support PUBLIC cuajone_platform)
+        target_compile_features(cuajone_launcher_support PUBLIC cxx_std_20)
+    endif()
+    add_executable(cuajone_qt_launcher WIN32
+        src/launcher-qt/main.cpp
+        src/launcher-qt/launcher_window.cpp
+        src/launcher-qt/launcher_window.hpp)
+    target_link_libraries(cuajone_qt_launcher PRIVATE
+        Qt6::Widgets cuajone_launcher_support cuajone_platform)
+    target_compile_features(cuajone_qt_launcher PRIVATE cxx_std_20)
+    target_compile_definitions(cuajone_qt_launcher PRIVATE
+        CUAJONE_QT_VERSION="${CUAJONE_VERSION_DISPLAY}")
+    if(MSVC)
+        target_compile_options(cuajone_qt_launcher PRIVATE /W4 /permissive- /EHsc /utf-8)
+    else()
+        target_compile_options(cuajone_qt_launcher PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    set_target_properties(cuajone_qt_launcher PROPERTIES
+        OUTPUT_NAME "${CUAJONE_PRODUCT_LAUNCHER_EXE}")
+    if(UNIX)
+        set_target_properties(cuajone_qt_launcher PROPERTIES
+            INSTALL_RPATH "$ORIGIN/../lib")
+    endif()
+endif()
+
+if(CUAJONE_BUILD_QT_VIEWER)
+    if(NOT CUAJONE_BUILD_RUNTIME)
+        message(STATUS
+            "CUAJONE_BUILD_QT_VIEWER requires CUAJONE_BUILD_RUNTIME=ON; "
+            "optional Qt6 viewer is disabled")
+        set(CUAJONE_BUILD_QT_VIEWER OFF)
+    endif()
+endif()
+
+if(WIN32 AND NOT CUAJONE_BUILD_QT_LAUNCHER
+    AND (CUAJONE_BUILD_RUNTIME OR CUAJONE_BUILD_LAUNCHER))
     set(CUAJONE_PRODUCT_ICON "${CMAKE_CURRENT_BINARY_DIR}/CuajonePPEMonitor.ico")
     set(CUAJONE_PRODUCT_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/product_icon.rc")
     set(CUAJONE_PRODUCT_SVG "${CMAKE_CURRENT_SOURCE_DIR}/../installer/native/assets/icon.svg")
@@ -61,19 +151,22 @@ if(WIN32 AND (CUAJONE_BUILD_LAUNCHER OR CUAJONE_BUILD_RUNTIME))
     add_custom_target(cuajone_product_icon DEPENDS "${CUAJONE_PRODUCT_ICON}")
 endif()
 
-if(CUAJONE_BUILD_LAUNCHER AND NOT UNIX)
-    add_library(cuajone_launcher_support
-        src/launcher/launcher_support.cpp
-    )
-    target_include_directories(cuajone_launcher_support PUBLIC include)
-    target_compile_features(cuajone_launcher_support PUBLIC cxx_std_20)
-    if(MSVC)
-        target_compile_options(cuajone_launcher_support PRIVATE /W4 /permissive- /EHsc /utf-8)
-    else()
-        target_compile_options(cuajone_launcher_support PRIVATE -Wall -Wextra -Wpedantic)
+if(CUAJONE_BUILD_LAUNCHER OR CUAJONE_BUILD_QT_LAUNCHER)
+    if(NOT TARGET cuajone_launcher_support)
+        add_library(cuajone_launcher_support
+            src/launcher/launcher_support.cpp
+        )
+        target_include_directories(cuajone_launcher_support PUBLIC include)
+        target_link_libraries(cuajone_launcher_support PUBLIC cuajone_platform)
+        target_compile_features(cuajone_launcher_support PUBLIC cxx_std_20)
+        if(MSVC)
+            target_compile_options(cuajone_launcher_support PRIVATE /W4 /permissive- /EHsc /utf-8)
+        else()
+            target_compile_options(cuajone_launcher_support PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
     endif()
 
-    if(WIN32)
+    if(WIN32 AND NOT CUAJONE_BUILD_QT_LAUNCHER)
         target_sources(cuajone_launcher_support PRIVATE src/launcher/launcher_version.cpp)
         target_link_libraries(cuajone_launcher_support PRIVATE version)
         set(launcher_version_resource "${CMAKE_CURRENT_BINARY_DIR}/launcher_version.rc")
@@ -96,13 +189,12 @@ if(CUAJONE_BUILD_LAUNCHER AND NOT UNIX)
     endif()
 endif()
 
-if(UNIX AND CUAJONE_ENABLE_TENSORRT)
-    # Linux Fase 0: no CUDA/TensorRT toolchain yet (lands in Fase 3).
-    # Forcing OFF keeps bare configures working; set TENSORRT_ROOT/CUDA_ROOT
-    # only once Fase 3 provisioning exists (see native/activate-native.sh).
+if(UNIX AND CUAJONE_ENABLE_TENSORRT AND NOT TENSORRT_ROOT)
+    # Keep ordinary Linux developer/CI configures CPU-only. A distribution
+    # build opts into TensorRT by supplying TENSORRT_ROOT explicitly.
     message(STATUS
-        "Linux Fase 0: TensorRT backend disabled "
-        "(CUAJONE_ENABLE_TENSORRT forced OFF until Fase 3)")
+        "Linux: TensorRT backend disabled because TENSORRT_ROOT is empty; "
+        "set TENSORRT_ROOT to enable the optional GPU build")
     set(CUAJONE_ENABLE_TENSORRT OFF)
 endif()
 
@@ -122,8 +214,31 @@ if(UNIX)
 endif()
 find_package(OpenCV ${CUAJONE_OPENCV_MIN_VERSION} REQUIRED COMPONENTS core imgproc)
 
-set(CUAJONE_BYTE_TRACK_COMMIT "a865158906f6138465668810a98ffd918d95f9a3")
-set(CUAJONE_EIGEN_COMMIT "3147391d946bb4b6c68edd901f2add6ac1f31f8c")
+set(CUAJONE_DEPENDENCY_LOCK
+    "${CMAKE_CURRENT_SOURCE_DIR}/../installer/linux/dependency-lock.env")
+if(NOT EXISTS "${CUAJONE_DEPENDENCY_LOCK}")
+    message(FATAL_ERROR "Native dependency lock is missing: ${CUAJONE_DEPENDENCY_LOCK}")
+endif()
+file(STRINGS "${CUAJONE_DEPENDENCY_LOCK}" CUAJONE_DEPENDENCY_LOCK_LINES
+    REGEX "^[A-Z_]+=")
+foreach(CUAJONE_LOCK_LINE IN LISTS CUAJONE_DEPENDENCY_LOCK_LINES)
+    string(REGEX MATCH "^([A-Z_]+)=(.*)$" CUAJONE_LOCK_MATCH
+        "${CUAJONE_LOCK_LINE}")
+    if(CUAJONE_LOCK_MATCH)
+        set("${CMAKE_MATCH_1}" "${CMAKE_MATCH_2}")
+    endif()
+endforeach()
+foreach(CUAJONE_REQUIRED_LOCK_VALUE
+    BYTE_TRACK_COMMIT BYTE_TRACK_SHA256 EIGEN_COMMIT EIGEN_SHA256
+    ONNX_RUNTIME_VERSION)
+    if(NOT DEFINED ${CUAJONE_REQUIRED_LOCK_VALUE}
+        OR "${${CUAJONE_REQUIRED_LOCK_VALUE}}" STREQUAL "")
+        message(FATAL_ERROR
+            "Native dependency lock value is missing: ${CUAJONE_REQUIRED_LOCK_VALUE}")
+    endif()
+endforeach()
+set(CUAJONE_BYTE_TRACK_COMMIT "${BYTE_TRACK_COMMIT}")
+set(CUAJONE_EIGEN_COMMIT "${EIGEN_COMMIT}")
 set(CUAJONE_BYTE_TRACK_ROOT
     "${CMAKE_CURRENT_SOURCE_DIR}/../.tools/native/dependencies/byte-track-eigen-${CUAJONE_BYTE_TRACK_COMMIT}"
     CACHE PATH "Verified patched ByteTrack-Eigen 2.1.0 source root")
@@ -135,7 +250,7 @@ if(NOT EXISTS "${CUAJONE_BYTE_TRACK_ROOT}/include/BYTETracker.h"
     OR NOT EXISTS "${CUAJONE_EIGEN_ROOT}/Eigen/Dense"
     OR NOT EXISTS "${CUAJONE_EIGEN_ROOT}/.cuajone-source-receipt.json")
     message(FATAL_ERROR
-        "Pinned ByteTrack-Eigen/Eigen sources are missing. Run native/Provision-TrackingDependencies.ps1 first")
+        "Pinned ByteTrack-Eigen/Eigen sources are missing. Run installer/linux/provision-deps.sh first")
 endif()
 file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/third_party/byte-track-eigen-cuajone.patch"
     CUAJONE_BYTE_TRACK_PATCH_SHA256)
@@ -151,10 +266,10 @@ function(cuajone_validate_source_receipt receipt_path expected_archive_sha256)
 endfunction()
 cuajone_validate_source_receipt(
     "${CUAJONE_BYTE_TRACK_ROOT}/.cuajone-source-receipt.json"
-    "e5a075df5e8b4ed4bb7436ffe7fe0f4cee5c6a6663112d6a1c47a99ffb704d88")
+    "${BYTE_TRACK_SHA256}")
 cuajone_validate_source_receipt(
     "${CUAJONE_EIGEN_ROOT}/.cuajone-source-receipt.json"
-    "9eec4ec4e5e459b2f59dbbaa4280e1bb3ee61cccd8a7c0af0321d29d95fece9e")
+    "${EIGEN_SHA256}")
 
 add_library(cuajone_byte_track_upstream STATIC
     "${CUAJONE_BYTE_TRACK_ROOT}/src/BaseTrack.cpp"
@@ -272,20 +387,19 @@ if(CUAJONE_BUILD_TESTS)
                 "PATH=path_list_prepend:$<TARGET_FILE_DIR:opencv_core>")
     endif()
     if(UNIX AND CUAJONE_BUILD_LAUNCHER)
-        # Linux Fase 0: the Win32 launcher (launcher.cpp/launcher_support.cpp
-        # include <windows.h> unconditionally) is excluded. The Qt6 GUI
-        # replacement lands in Fase 2; see docs/LinuxPort.md.
+        # The legacy Win32 launcher is excluded on UNIX. The optional Qt6
+        # replacement is a separate target; see docs/LinuxPort.md.
         message(STATUS
-            "Linux Fase 0: Win32 launcher excluded (Qt6 GUI lands in Fase 2); "
+            "UNIX: legacy Win32 launcher excluded (optional Qt6 GUI is Fase 2a); "
             "building portable core libraries and cpu_tests only")
     endif()
 
-    # Linux Fase 1: launcher_tests still need cuajone_launcher_support
-    # (<windows.h>) and Win32 .rc fixtures; excluded until the Fase 2 Qt6 GUI.
+    # Linux Fase 1: launcher_tests still need the Win32 GUI and .rc fixtures;
+    # they remain Windows-only while the Qt6 GUI has its own smoke coverage.
     # The POSIX runtime port (capture reachability, portable SHA-256, Linux
     # ONNX Runtime package) enables evidence, onnx, and capture_diagnostics
     # tests on UNIX in the runtime block below.
-    if(CUAJONE_BUILD_LAUNCHER AND NOT UNIX)
+    if(TARGET cuajone_launcher)
         add_executable(cuajone_launcher_tests tests/launcher_tests.cpp)
         if(WIN32)
             target_sources(cuajone_launcher_tests PRIVATE tests/launcher_version_fixture.rc)
@@ -316,14 +430,16 @@ if(CUAJONE_BUILD_TESTS)
 endif()
 
 if(UNIX AND CUAJONE_BUILD_RUNTIME)
-    # Linux Fase 1: the POSIX runtime port (capture BSD-sockets reachability,
+    # UNIX: the POSIX runtime port (capture BSD-sockets reachability,
     # portable SHA-256, Linux ONNX Runtime package) builds cuajone_runtime and
-    # the NexoAIVision CLI below. Still excluded: Win32 launcher + Qt6 GUI
-    # (Fase 2), installer custom action (msiquery.h), TensorRT/CUDA backends
-    # (Fase 3), dumpbin closure copy, delayimp/DELAYLOAD; see docs/LinuxPort.md.
+    # the NexoAIVision CLI below. The Qt6 launcher/viewer are optional Fase
+    # 2a/2b targets.
+    # Still excluded from this ordinary CPU job: Win32 launcher, installer
+    # custom action (msiquery.h), dumpbin closure copy, delayimp/DELAYLOAD;
+    # the optional Linux TensorRT package path is documented in docs/LinuxPort.md.
     message(STATUS
         "Linux Fase 1: building POSIX runtime (cuajone_runtime + NexoAIVision CLI); "
-        "launcher/Qt6 GUI lands in Fase 2, CUDA/TensorRT in Fase 3")
+         "optional Qt6 launcher/viewer are available on both OSes; CUDA/TensorRT is Fase 3")
 endif()
 
 if(CUAJONE_BUILD_RUNTIME)
@@ -384,8 +500,13 @@ if(CUAJONE_BUILD_RUNTIME)
         unset(TENSORRT_INCLUDE_DIR CACHE)
         unset(TENSORRT_NVINFER_LIBRARY CACHE)
         find_path(TENSORRT_INCLUDE_DIR NvInfer.h PATHS "${TENSORRT_ROOT}/include" NO_DEFAULT_PATH)
-        find_library(TENSORRT_NVINFER_LIBRARY NAMES nvinfer_11
+        if(UNIX)
+            find_library(TENSORRT_NVINFER_LIBRARY NAMES nvinfer nvinfer_11
+                PATHS "${TENSORRT_ROOT}/lib" "${TENSORRT_ROOT}/lib/x64" NO_DEFAULT_PATH)
+        else()
+            find_library(TENSORRT_NVINFER_LIBRARY NAMES nvinfer_11
             PATHS "${TENSORRT_ROOT}/lib" "${TENSORRT_ROOT}/lib/x64" NO_DEFAULT_PATH)
+        endif()
         if(NOT TENSORRT_INCLUDE_DIR OR NOT TENSORRT_NVINFER_LIBRARY)
             message(FATAL_ERROR "TensorRT 11 headers and nvinfer_11 import library are required")
         endif()
@@ -426,7 +547,14 @@ if(CUAJONE_BUILD_RUNTIME)
             set(CUAJONE_CUDART_TARGET CUDA::cudart)
         endif()
     endif()
-    find_package(OpenCV ${CUAJONE_OPENCV_MIN_VERSION} REQUIRED COMPONENTS core imgproc imgcodecs videoio highgui)
+    if(CUAJONE_BUILD_QT_VIEWER)
+        # The Qt viewer replaces HighGUI on this path on both supported OSes.
+        find_package(OpenCV ${CUAJONE_OPENCV_MIN_VERSION} REQUIRED COMPONENTS
+            core imgproc imgcodecs videoio)
+    else()
+        find_package(OpenCV ${CUAJONE_OPENCV_MIN_VERSION} REQUIRED COMPONENTS
+            core imgproc imgcodecs videoio highgui)
+    endif()
 
     add_library(cuajone_runtime
         src/runtime/capture.cpp
@@ -439,7 +567,10 @@ if(CUAJONE_BUILD_RUNTIME)
     target_link_libraries(cuajone_runtime
         PUBLIC cuajone_core
         PRIVATE cuajone_onnxruntime
-            opencv_imgcodecs opencv_videoio opencv_highgui)
+            opencv_imgcodecs opencv_videoio)
+    if(NOT CUAJONE_BUILD_QT_VIEWER)
+        target_link_libraries(cuajone_runtime PRIVATE opencv_highgui)
+    endif()
     if(WIN32)
         target_link_libraries(cuajone_runtime PRIVATE bcrypt ws2_32)
     else()
@@ -479,16 +610,24 @@ if(CUAJONE_BUILD_RUNTIME)
         endif()
     endif()
 
-    if(WIN32)
+    if(WIN32 AND NOT (CUAJONE_BUILD_QT_VIEWER OR CUAJONE_BUILD_QT_LAUNCHER))
     add_executable(cuajone_native src/app/main.cpp "${CUAJONE_PRODUCT_RESOURCE}")
     add_dependencies(cuajone_native cuajone_product_icon)
     else()
-        # Linux Fase 1: CLI without the Win32 icon resource; no launcher (Fase 2).
+        # The runtime has no resource file when the Qt viewer is the primary UI.
         add_executable(cuajone_native src/app/main.cpp)
         set_target_properties(cuajone_native PROPERTIES
-            BUILD_RPATH "${CUAJONE_ORT_RPATH}")
+            BUILD_RPATH "${CUAJONE_ORT_RPATH}"
+            INSTALL_RPATH "$ORIGIN/../lib")
     endif()
     target_link_libraries(cuajone_native PRIVATE cuajone_runtime)
+    if(CUAJONE_BUILD_QT_VIEWER)
+        target_sources(cuajone_native PRIVATE
+            src/app/qt_mosaic_viewer.cpp
+            src/app/qt_mosaic_viewer.hpp)
+        target_compile_definitions(cuajone_native PRIVATE CUAJONE_BUILD_QT_VIEWER=1)
+        target_link_libraries(cuajone_native PRIVATE Qt6::Widgets Qt6::Gui)
+    endif()
     if(MSVC)
         target_compile_options(cuajone_native PRIVATE /W4 /permissive- /EHsc /utf-8)
     else()
@@ -717,3 +856,5 @@ if(CUAJONE_BUILD_RUNTIME)
     endif()
     endif()
 endif()
+
+include(cmake/Packaging.cmake)

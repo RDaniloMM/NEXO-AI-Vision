@@ -930,6 +930,7 @@ $nativeRoot = Join-Path $projectRoot "native"
 $cmakeLists = Join-Path $nativeRoot "CMakeLists.txt"
 $allCpp = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot "src") -Recurse -File -Filter "*.cpp").FullName
 $allHeaders = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot "include") -Recurse -File -Include "*.hpp", "*.h").FullName
+$platformSources = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot "src\platform") -Recurse -File -Include "*.cpp", "*.hpp").FullName
 $launcherNames = @("launcher.cpp", "launcher_support.cpp", "launcher_support.hpp", "launcher_resources.h", "launcher_version.cpp", "launcher_version.hpp")
 $probeNames = @("compute.cpp", "installer_custom_action.cpp", "compute.hpp")
 $freshnessByBinary = @{
@@ -946,10 +947,9 @@ $freshnessByBinary = @{
         (Join-Path $nativeRoot "cmake\LauncherVersion.cmake"),
         (Join-Path $nativeRoot "resources\launcher_version.rc.in"),
         (Join-Path $nativeRoot "resources\launcher.rc.in")) + @(
-        $allCpp + $allHeaders | Where-Object {
-            (Split-Path -Leaf $_) -in $launcherNames
-        }
-    )
+         $allCpp + $allHeaders | Where-Object {
+             (Split-Path -Leaf $_) -in $launcherNames
+         }) + $platformSources
     $HardwareProbeCustomAction = @($cmakeLists) + @(
         $allCpp + $allHeaders | Where-Object {
             (Split-Path -Leaf $_) -in $probeNames

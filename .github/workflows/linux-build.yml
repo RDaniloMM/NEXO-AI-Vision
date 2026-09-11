@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 #
-# Linux Fase 1 port build (DGX OS / Ubuntu 24.04, GCC 13, Ninja).
+# Linux port builds (Fase 1 POSIX runtime + Fase 2a/2b Qt6; DGX OS /
+# Ubuntu 24.04, GCC 13, Ninja).
 #
 # Scope: portable core libraries + cuajone_cpu_tests + the POSIX runtime
 # (cuajone_runtime, NexoAIVision CLI via the `linux-release` preset) and the
 # runtime test binaries it enables: cuajone_evidence_tests,
 # cuajone_capture_diagnostics_tests, cuajone_onnx_tests (exact target names).
-# The Windows-only remainder (Win32 launcher/Qt6 GUI in Fase 2, installer CA,
-# TensorRT/CUDA backends in Fase 3) stays skipped on UNIX by
-# native/CMakeLists.txt. The Linux ONNX Runtime 1.25.0 package
+# The Windows-only remainder (Win32 launcher, installer CA) stays skipped on
+# UNIX by native/CMakeLists.txt. TensorRT/CUDA is opt-in only in the package
+# job; the ordinary CPU jobs remain CPU-only. The Linux ONNX Runtime 1.25.0 package
 # (onnxruntime-linux-x64) is provisioned below; see docs/LinuxPort.md.
 
-name: Linux build (Fase 1)
+name: Linux build (Fase 1 + Qt6)
 
 on:
   push:
@@ -39,15 +40,14 @@ jobs:
           path: |
             .tools/native/dependencies
             .tools/native/linux-onnxruntime-1.25.0
-          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-cuajone.patch') }}-ort1.25.0
+          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-cuajone.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
 
       - name: Install toolchain and OpenCV
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build pkg-config \
-            libopencv-dev git patch unzip curl ca-certificates
-          # qt6-base-dev is intentionally absent: the Qt6 GUI lands in Fase 2.
+            dpkg-dev libopencv-dev qt6-base-dev git patch unzip curl ca-certificates
 
       - name: Show toolchain versions
         run: |
@@ -56,110 +56,8 @@ jobs:
           ninja --version
           pkg-config --modversion opencv4
 
-      - name: Provision tracking dependencies (ByteTrack-Eigen + Eigen)
-        # Bash mirror of native/Provision-TrackingDependencies.ps1: verified
-        # archives, pinned hashes, patch via `git apply`, receipt JSONs that
-        # native/CMakeLists.txt validates at configure time.
-        run: |
-          set -euo pipefail
-          BYTE_TRACK_COMMIT="a865158906f6138465668810a98ffd918d95f9a3"
-          EIGEN_COMMIT="3147391d946bb4b6c68edd901f2add6ac1f31f8c"
-          BYTE_TRACK_SHA="e5a075df5e8b4ed4bb7436ffe7fe0f4cee5c6a6663112d6a1c47a99ffb704d88"
-          EIGEN_SHA="9eec4ec4e5e459b2f59dbbaa4280e1bb3ee61cccd8a7c0af0321d29d95fece9e"
-          TOOL_ROOT="${{ github.workspace }}/.tools/native"
-          DOWNLOAD_ROOT="$TOOL_ROOT/downloads"
-          DEPENDENCY_ROOT="$TOOL_ROOT/dependencies"
-          TEMP_ROOT="$TOOL_ROOT/temp/tracking-dependencies"
-          PATCH_PATH="${{ github.workspace }}/native/third_party/byte-track-eigen-cuajone.patch"
-          mkdir -p "$DOWNLOAD_ROOT" "$DEPENDENCY_ROOT"
-          PATCH_SHA="$(sha256sum "$PATCH_PATH" | cut -d' ' -f1)"
-
-          fetch_verified() {
-            local url="$1" path="$2" expected="$3" description="$4"
-            if [ ! -f "$path" ]; then
-              curl -fsSL -o "$path" "$url"
-            fi
-            local actual
-            actual="$(sha256sum "$path" | cut -d' ' -f1)"
-            if [ "$actual" != "$expected" ]; then
-              echo "$description archive SHA-256 mismatch: expected $expected, got $actual" >&2
-              exit 1
-            fi
-          }
-
-          provision() {
-            local archive="$1" target="$2" root_name="$3" marker="$4" apply_patch="$5"
-            local receipt="$target/.cuajone-source-receipt.json"
-            local archive_sha
-            archive_sha="$(sha256sum "$archive" | cut -d' ' -f1)"
-            if [ -f "$target/$marker" ] && [ -f "$receipt" ] \
-              && grep -q "\"archive_sha256\":\"$archive_sha\"" "$receipt" \
-              && grep -q "\"patch_sha256\":\"$PATCH_SHA\"" "$receipt" \
-              && { [ "$apply_patch" -eq 0 ] || grep -q "retained_track_count" "$target/$marker"; }; then
-              echo "Tracking dependency cache hit: $target"
-              return 0
-            fi
-            rm -rf "$target" "$TEMP_ROOT"
-            mkdir -p "$TEMP_ROOT"
-            unzip -q "$archive" -d "$TEMP_ROOT"
-            local expanded="$TEMP_ROOT/$root_name"
-            if [ ! -d "$expanded" ]; then
-              echo "Verified dependency archive did not contain expected root: $root_name" >&2
-              exit 1
-            fi
-            if [ "$apply_patch" -eq 1 ]; then
-              (
-                cd "$expanded"
-                GIT_CEILING_DIRECTORIES="$TEMP_ROOT" git apply --no-index --check "$PATCH_PATH"
-                GIT_CEILING_DIRECTORIES="$TEMP_ROOT" git apply --no-index "$PATCH_PATH"
-              )
-            fi
-            mv "$expanded" "$target"
-            printf '{"archive_sha256":"%s","patch_sha256":"%s"}' "$archive_sha" "$PATCH_SHA" > "$receipt"
-          }
-
-          fetch_verified \
-            "https://codeload.github.com/cj-mills/byte-track-eigen/zip/$BYTE_TRACK_COMMIT" \
-            "$DOWNLOAD_ROOT/byte-track-eigen-$BYTE_TRACK_COMMIT.zip" \
-            "$BYTE_TRACK_SHA" "ByteTrack-Eigen 2.1.0"
-          fetch_verified \
-            "https://gitlab.com/libeigen/eigen/-/archive/$EIGEN_COMMIT/eigen-$EIGEN_COMMIT.zip" \
-            "$DOWNLOAD_ROOT/eigen-$EIGEN_COMMIT.zip" \
-            "$EIGEN_SHA" "Eigen 3.4.0"
-          provision \
-            "$DOWNLOAD_ROOT/byte-track-eigen-$BYTE_TRACK_COMMIT.zip" \
-            "$DEPENDENCY_ROOT/byte-track-eigen-$BYTE_TRACK_COMMIT" \
-            "byte-track-eigen-$BYTE_TRACK_COMMIT" "include/BYTETracker.h" 1
-          provision \
-            "$DOWNLOAD_ROOT/eigen-$EIGEN_COMMIT.zip" \
-            "$DEPENDENCY_ROOT/eigen-$EIGEN_COMMIT" \
-            "eigen-$EIGEN_COMMIT" "Eigen/Dense" 0
-          echo "Tracking dependencies verified under $DEPENDENCY_ROOT"
-
-      - name: Provision ONNX Runtime (Linux x64 1.25.0)
-        # Upstream CPU package matching native/CMakeLists.txt
-        # (include/onnxruntime_cxx_api.h + lib/libonnxruntime.so). Microsoft
-        # publishes no checksum file for this asset, so the layout check
-        # below (mirrored at CMake configure time) is the verification.
-        run: |
-          set -euo pipefail
-          ORT_VERSION="1.25.0"
-          ORT_ROOT="${{ github.workspace }}/.tools/native/linux-onnxruntime-1.25.0"
-          ORT_ARCHIVE="${{ github.workspace }}/.tools/native/downloads/onnxruntime-linux-x64-$ORT_VERSION.tgz"
-          mkdir -p "$(dirname "$ORT_ARCHIVE")"
-          if [ ! -f "$ORT_ROOT/include/onnxruntime_cxx_api.h" ] \
-            || [ ! -e "$ORT_ROOT/lib/libonnxruntime.so" ]; then
-            rm -rf "$ORT_ROOT"
-            mkdir -p "$ORT_ROOT"
-            if [ ! -f "$ORT_ARCHIVE" ]; then
-              curl -fsSL -o "$ORT_ARCHIVE" \
-                "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz"
-            fi
-            tar -xzf "$ORT_ARCHIVE" -C "$ORT_ROOT" --strip-components=1
-          fi
-          test -f "$ORT_ROOT/include/onnxruntime_cxx_api.h"
-          test -e "$ORT_ROOT/lib/libonnxruntime.so"
-          echo "ONNX Runtime verified under $ORT_ROOT"
+      - name: Provision verified native dependencies
+        run: bash installer/linux/provision-deps.sh --project-root "$GITHUB_WORKSPACE"
 
       - name: Configure (linux-release preset)
         working-directory: native
@@ -172,3 +70,135 @@ jobs:
       - name: Run native tests (CTest)
         working-directory: native
         run: ctest --preset linux-release --output-on-failure
+
+  linux-qt:
+    name: Qt6 launcher smoke build
+    needs: linux-fase1
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore native dependency cache
+        uses: actions/cache@v4
+        with:
+          path: .tools/native/dependencies
+          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-cuajone.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
+
+      - name: Install Qt6 and build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config dpkg-dev libopencv-dev qt6-base-dev git patch unzip curl ca-certificates
+
+      - name: Provision verified native dependencies
+        run: bash installer/linux/provision-deps.sh --project-root "$GITHUB_WORKSPACE"
+
+      - name: Configure Qt6 launcher
+        run: |
+          cmake -S native -B .tools/native/build/presets/linux-qt \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCUAJONE_BUILD_RUNTIME=OFF \
+            -DCUAJONE_BUILD_TESTS=OFF \
+            -DCUAJONE_BUILD_LAUNCHER=OFF \
+            -DCUAJONE_BUILD_QT_LAUNCHER=ON
+
+      - name: Build exact Qt6 launcher target
+        run: cmake --build .tools/native/build/presets/linux-qt --target cuajone_qt_launcher
+
+      - name: Qt6 launcher help smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: .tools/native/build/presets/linux-qt/NexoAIVisionLauncher --help
+
+  linux-qt-viewer:
+    name: Qt6 live analytics viewer build
+    needs: linux-fase1
+    runs-on: ubuntu-24.04
+    env:
+      ONNXRUNTIME_ROOT: ${{ github.workspace }}/.tools/native/linux-onnxruntime-1.25.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore native dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tools/native/dependencies
+            .tools/native/linux-onnxruntime-1.25.0
+          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-cuajone.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
+
+      - name: Install Qt6 and build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config dpkg-dev libopencv-dev qt6-base-dev git patch unzip curl ca-certificates
+
+      - name: Provision verified native dependencies
+        run: bash installer/linux/provision-deps.sh --project-root "$GITHUB_WORKSPACE"
+
+      - name: Configure Qt6 live viewer
+        run: |
+          cmake -S native -B .tools/native/build/presets/linux-qt-viewer \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCUAJONE_BUILD_RUNTIME=ON \
+            -DCUAJONE_BUILD_TESTS=OFF \
+            -DCUAJONE_BUILD_LAUNCHER=OFF \
+            -DCUAJONE_BUILD_QT_VIEWER=ON \
+            -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
+
+      - name: Build exact Qt6 viewer runtime target
+        run: cmake --build .tools/native/build/presets/linux-qt-viewer --target cuajone_native
+
+      - name: Qt6 viewer help smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: .tools/native/build/presets/linux-qt-viewer/NexoAIVision --help
+
+  linux-package:
+    name: Linux DEB and tarball package
+    runs-on: ubuntu-24.04
+    env:
+      ONNXRUNTIME_ROOT: ${{ github.workspace }}/.tools/native/linux-onnxruntime-1.25.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache native dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tools/native/dependencies
+            .tools/native/linux-onnxruntime-1.25.0
+          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-cuajone.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
+
+      - name: Install packaging toolchain and GUI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config dpkg-dev \
+            libopencv-dev qt6-base-dev git patch unzip curl ca-certificates
+
+      - name: Provision verified native dependencies
+        run: bash installer/linux/provision-deps.sh --project-root "$GITHUB_WORKSPACE"
+
+      - name: Build DEB and tarball
+        run: |
+          chmod +x installer/linux/build-dist.sh installer/linux/run.sh installer/linux/postinst
+          installer/linux/build-dist.sh \
+            --build-dir .tools/native/build/linux-package \
+            --output-dir .tools/native/dist \
+            --version 0.1.0 \
+            --with-qt
+
+      - name: Verify package outputs
+        run: |
+          test -f .tools/native/dist/nexoai-vision-0.1.0-linux-x86_64.deb
+          test -f .tools/native/dist/nexoai-vision-0.1.0-linux-x86_64.tar.gz
+          tar -tzf .tools/native/dist/nexoai-vision-0.1.0-linux-x86_64.tar.gz | grep -E '(^|/)run\.sh$'
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexoai-vision-linux-0.1.0
+          path: .tools/native/dist/*
+          if-no-files-found: error

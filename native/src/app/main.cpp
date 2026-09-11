@@ -7,7 +7,11 @@
 #include "cuajone/performance_telemetry.hpp"
 #include "cuajone/runtime_execution_plan.hpp"
 
+#ifdef CUAJONE_BUILD_QT_VIEWER
+#include "qt_mosaic_viewer.hpp"
+#else
 #include <opencv2/highgui.hpp>
+#endif
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -509,10 +513,31 @@ void drawAssociatedItem(cv::Mat& frame, const std::optional<Detection>& item, co
         cv::FONT_HERSHEY_SIMPLEX, 0.44, cv::Scalar(210, 210, 230), 1, cv::LINE_AA);
 }
 
+#ifdef CUAJONE_BUILD_QT_VIEWER
+using GridLayout = QtMosaicGridLayout;
+using MosaicUiState = QtMosaicUiState;
+#else
 struct GridLayout {
     std::size_t rows{};
     std::size_t cols{};
 };
+
+struct MosaicUiState {
+    GridLayout layout{};
+    std::vector<double> col_weights;
+    std::vector<double> row_weights;
+    std::vector<cv::Rect> tile_rects;
+    int canvas_width{};
+    int canvas_height{};
+    int hover_tile{-1};
+    Clock::time_point hover_time{Clock::time_point::min()};
+    int focused_tile{};
+    bool dragging{};
+    int drag_col{-1};
+    int drag_row{-1};
+    bool ui_dirty{};
+};
+#endif
 
 // Pure helper: balanced grid with cols=ceil(sqrt(n)), rows=ceil(n/cols).
 // 1->1x1, 2->1x2, 3-4->2x2, 5-6->2x3, ... Surplus cells stay black.
@@ -580,21 +605,6 @@ GridLayout computeGridLayout(std::size_t source_count) {
 //   layout is recomputed. Dividers have an 8 px grab zone.
 // - Keyboard on the focused tile: '+'/'=' enlarge, '-'/'_' shrink,
 //   '['/']' move focus, '0' resets all weights to 1.0.
-struct MosaicUiState {
-    GridLayout layout{};
-    std::vector<double> col_weights;
-    std::vector<double> row_weights;
-    std::vector<cv::Rect> tile_rects;
-    int canvas_width{};
-    int canvas_height{};
-    int hover_tile{-1};
-    Clock::time_point hover_time{Clock::time_point::min()};
-    int focused_tile{};
-    bool dragging{};
-    int drag_col{-1};
-    int drag_row{-1};
-};
-
 constexpr int kDividerGrabPixels = 8;
 constexpr double kMinTileWeight = 0.20;
 constexpr double kFocusStepFactor = 1.10;
@@ -692,6 +702,7 @@ void mosaicRebalanceRows(MosaicUiState& state, int divider_row, int mouse_y) {
     state.row_weights[divider_row + 1] = std::max(kMinTileWeight, pair_total * (1.0 - fraction));
 }
 
+#if !defined(CUAJONE_BUILD_QT_VIEWER)
 void onMosaicMouse(int event, int x, int y, int flags, void* userdata) {
     auto* state = static_cast<MosaicUiState*>(userdata);
     if (state == nullptr || state->tile_rects.empty()) return;
@@ -738,6 +749,7 @@ void onMosaicMouse(int event, int x, int y, int flags, void* userdata) {
         state->drag_row = -1;
     }
 }
+#endif
 
 // Pastes the clean (unannotated) frame into the tile pixel-perfect 1:1
 // (never upscales; only downscales when the native frame does not fit the
@@ -912,6 +924,7 @@ void drawReconnectBannerOnCanvas(cv::Mat& canvas, const cv::Rect& tile) {
     }
 }
 
+#if !defined(CUAJONE_BUILD_QT_VIEWER)
 [[maybe_unused]] bool liveWindowStopRequested(std::string_view window_title) {
     const int key = cv::waitKey(1) & 0xFF;
     if (key == 'q' || key == 27) return true;
@@ -961,11 +974,18 @@ bool pollLiveWindow(MosaicUiState& state, std::string_view window_title) {
     }
     return cv::getWindowProperty(std::string(window_title), cv::WND_PROP_VISIBLE) < 1.0;
 }
+#endif
 
 int monitor(
     const RuntimeConfig& config,
     NativeEnginePipeline& pipeline,
-    PerformanceTelemetry* telemetry) {
+    PerformanceTelemetry* telemetry,
+    int argc,
+    char** argv) {
+#if !defined(CUAJONE_BUILD_QT_VIEWER)
+    static_cast<void>(argc);
+    static_cast<void>(argv);
+#endif
     std::optional<EvidenceWriter> evidence;
     std::optional<EvidenceWriterV3> evidence_v3;
     std::unique_ptr<EvidenceWriterQueue> evidence_queue;
@@ -1044,6 +1064,13 @@ int monitor(
     mosaic.canvas_width = canvas_width;
     mosaic.canvas_height = canvas_height;
     initMosaicWeights(mosaic);
+#ifdef CUAJONE_BUILD_QT_VIEWER
+    std::unique_ptr<QtMosaicViewer> qt_viewer;
+    if (config.show_window) {
+        qt_viewer = std::make_unique<QtMosaicViewer>(
+            argc, argv, kLiveAnalyticsWindowTitle, mosaic);
+    }
+#endif
     std::vector<double> last_composed_cols;
     std::vector<double> last_composed_rows;
     bool grid_shown{};
@@ -1061,6 +1088,10 @@ int monitor(
     const bool periodic_telemetry = telemetry != nullptr && telemetry_interval.count() > 0.0;
     auto next_snapshot = Clock::now() + telemetry_interval;
     if (config.show_window) {
+#ifdef CUAJONE_BUILD_QT_VIEWER
+        // QtMosaicViewer owns the sole QApplication and is pumped from this
+        // monitor loop; QApplication::exec() is intentionally not used.
+#else
         // Keep the window aspect: KEEPRATIO is a no-op value-wise
         // (WINDOW_KEEPRATIO == 0) but documents intent; the Win32 HighGUI
         // backend stretches WINDOW_NORMAL content to the client area, so the
@@ -1075,6 +1106,7 @@ int monitor(
         applyLiveAnalyticsWindowIcon(kLiveAnalyticsWindowTitle);
 #endif
         cv::setMouseCallback(kLiveAnalyticsWindowTitle, onMosaicMouse, &mosaic);
+#endif
     }
 
     while (!stop_requested.load(std::memory_order_relaxed)) {
@@ -1271,13 +1303,14 @@ int monitor(
             const bool weights_changed = mosaic.col_weights != last_composed_cols
                 || mosaic.row_weights != last_composed_rows;
             const bool grid_dirty = !grid_shown || mosaic.dragging || weights_changed || hover_visible
+                || mosaic.ui_dirty
                 || std::ranges::any_of(sources, [](const SourceState& source) {
                         return source.display_dirty;
                     });
             const bool time_for_compose = !grid_shown
                 || now_for_dirty - last_compose >= kMinComposeInterval;
             if (grid_dirty && grid_layout.cols > 0
-                && (time_for_compose || weights_changed || mosaic.dragging)) {
+                && (time_for_compose || weights_changed || mosaic.dragging || mosaic.ui_dirty)) {
                 mosaic.tile_rects = weightedTileRects(
                     grid_layout, mosaic.col_weights, mosaic.row_weights,
                     canvas_width, canvas_height);
@@ -1291,6 +1324,9 @@ int monitor(
                     rect.x += display_dx;
                     rect.y += display_dy;
                 }
+#ifdef CUAJONE_BUILD_QT_VIEWER
+                qt_viewer->setTileRects(mosaic.tile_rects);
+#endif
                 cv::Mat display(kDisplayHeight, kDisplayWidth, CV_8UC3, cv::Scalar(0, 0, 0));
                 const auto compose_time = Clock::now();
                 const auto render_started = telemetry == nullptr ? Clock::time_point{} : Clock::now();
@@ -1352,13 +1388,18 @@ int monitor(
                     {display_dx + 12, display.rows - 10}, cv::FONT_HERSHEY_SIMPLEX, 0.5,
                     cv::Scalar(220, 220, 220), 1, cv::LINE_AA);
                 if (telemetry != nullptr) telemetry->addSample(PerformanceStage::Render, Clock::now() - render_started);
+#ifdef CUAJONE_BUILD_QT_VIEWER
+                qt_viewer->setCanvas(display);
+#else
                 cv::imshow(kLiveAnalyticsWindowTitle, display);
+#endif
                 // Displayed frames are counted per compose, not per inference,
                 // so displayed_fps truthfully reports the composed output rate.
                 if (telemetry != nullptr) telemetry->displayedFrame();
                 last_compose = Clock::now();
                 composed = true;
                 grid_shown = true;
+                mosaic.ui_dirty = false;
                 last_composed_cols = mosaic.col_weights;
                 last_composed_rows = mosaic.row_weights;
             }
@@ -1372,7 +1413,13 @@ int monitor(
             if (composed || now_for_poll - last_poll >= kMinComposeInterval) {
                 last_poll = now_for_poll;
                 polled = true;
-                if (pollLiveWindow(mosaic, kLiveAnalyticsWindowTitle)) {
+                if (
+#ifdef CUAJONE_BUILD_QT_VIEWER
+                    qt_viewer->processEvents()
+#else
+                    pollLiveWindow(mosaic, kLiveAnalyticsWindowTitle)
+#endif
+                ) {
                     stop_requested.store(true, std::memory_order_relaxed);
                 }
             }
@@ -1382,7 +1429,11 @@ int monitor(
         }
     }
     for (auto& source : sources) source.capture->stop();
+#ifdef CUAJONE_BUILD_QT_VIEWER
+    qt_viewer.reset();
+#else
     cv::destroyAllWindows();
+#endif
     if (!evidence_queue) return 0;
     evidence_queue->drainAndStop();
     const EvidenceWriterQueueStats queue_stats = evidence_queue->stats();
@@ -1532,7 +1583,7 @@ int main(int argc, char** argv) {
 #endif
         if (config.preflight) return 0;
         const int result = config.benchmark_image.empty()
-            ? monitor(config, *pipeline, telemetry.get())
+            ? monitor(config, *pipeline, telemetry.get(), argc, argv)
             : benchmark(config, *pipeline, *telemetry);
         if (telemetry) std::cout << telemetry->jsonReport() << '\n';
         return result;

@@ -6,8 +6,8 @@
 # System prerequisites (Ubuntu 24.04 / DGX OS 7, GCC 13 default toolchain):
 #   sudo apt update
 #   sudo apt install -y build-essential cmake ninja-build pkg-config \
-#       libopencv-dev git patch unzip curl
-# Fase 2 (Qt6 GUI) additionally needs: qt6-base-dev
+#       dpkg-dev libopencv-dev git patch unzip curl
+# Fase 2a/2b (Qt6 launcher/live viewer) additionally needs: qt6-base-dev
 # Fase 3 (CUDA/TensorRT) additionally needs: NVIDIA CUDA + TensorRT SDKs
 #
 # Usage:
@@ -33,11 +33,13 @@ done
 _CUAJONE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _CUAJONE_PROJECT_ROOT="$(dirname "${_CUAJONE_SCRIPT_DIR}")"
 _CUAJONE_TOOL_ROOT="${_CUAJONE_PROJECT_ROOT}/.tools/native"
+# shellcheck disable=SC1091
+source "${_CUAJONE_PROJECT_ROOT}/installer/linux/dependency-lock.env"
 
 # --- Toolchain locations (override by exporting before sourcing) ---
 # ONNX Runtime: Linux 1.25.0 package (Fase 1 runtime); provision it with the
 # 'Provision ONNX Runtime' step of .github/workflows/linux-build.yml.
-: "${ONNXRUNTIME_ROOT:=${_CUAJONE_TOOL_ROOT}/linux-onnxruntime-1.25.0}"
+: "${ONNXRUNTIME_ROOT:=${_CUAJONE_TOOL_ROOT}/linux-onnxruntime-${ONNX_RUNTIME_VERSION}}"
 # OpenCV: empty means CMake system search, which finds apt libopencv-dev
 # (/usr/lib/x86_64-linux-gnu/cmake/opencv4). Point at a custom build if needed.
 : "${OpenCV_DIR:=}"
@@ -80,7 +82,7 @@ if [ ! -f "${ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h" ]; then
     echo "activate-native.sh: warning: Linux ONNX Runtime 1.25.0 not found under ${ONNXRUNTIME_ROOT}" >&2
     echo "  Replicate the 'Provision ONNX Runtime' step of .github/workflows/linux-build.yml" >&2
 fi
-if [ ! -f "${_CUAJONE_TOOL_ROOT}/dependencies/byte-track-eigen-a865158906f6138465668810a98ffd918d95f9a3/.cuajone-source-receipt.json" ]; then
+if [ ! -f "${_CUAJONE_TOOL_ROOT}/dependencies/byte-track-eigen-${BYTE_TRACK_COMMIT}/.cuajone-source-receipt.json" ]; then
     echo "activate-native.sh: warning: pinned ByteTrack/Eigen sources are missing under .tools/native/dependencies" >&2
     echo "  Replicate the 'Provision tracking dependencies' step of .github/workflows/linux-build.yml" >&2
 fi

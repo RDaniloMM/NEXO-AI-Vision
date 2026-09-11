@@ -1,0 +1,4 @@
+# Nexo AI Vision Linux runtime configuration.
+# This file contains no credentials. The Debian package creates /etc/nexoai-vision/config
+# with this default when it does not already exist.
+ComputeMode=auto
