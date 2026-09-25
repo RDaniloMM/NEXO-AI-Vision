@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <stdexcept>
 
-namespace cuajone::platform {
+namespace nexoai::platform {
 namespace {
 
 std::filesystem::path environmentPath(const char* name, const std::filesystem::path& fallback) {
@@ -108,4 +108,4 @@ void atomicReplaceFile(
     }
 }
 
-}  // namespace cuajone::platform
+}  // namespace nexoai::platform

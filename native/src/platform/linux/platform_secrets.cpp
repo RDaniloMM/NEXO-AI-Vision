@@ -5,7 +5,7 @@
 #include <map>
 #include <mutex>
 
-namespace cuajone::platform {
+namespace nexoai::platform {
 namespace {
 
 std::mutex mutex;
@@ -36,4 +36,4 @@ void deleteCameraPassword(std::wstring_view profile_name) noexcept {
     session_passwords.erase(std::wstring(profile_name));
 }
 
-}  // namespace cuajone::platform
+}  // namespace nexoai::platform

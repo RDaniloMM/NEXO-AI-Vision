@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
-from cuajone_qa.contracts import (
+from nexoai_qa.contracts import (
     CONTRACT_ROOT,
     SCHEMA_NAMES,
     ContractValidationError,

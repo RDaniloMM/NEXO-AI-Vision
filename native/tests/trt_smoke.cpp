@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/engine_reader.hpp"
-#include "cuajone/tensorrt_runtime.hpp"
+#include "nexoai/engine_reader.hpp"
+#include "nexoai/tensorrt_runtime.hpp"
 
 #include <cmath>
 #include <cstring>
@@ -11,13 +11,13 @@
 
 int main(int argc, char** argv) {
     if (argc != 2) {
-        std::cerr << "Usage: cuajone_trt_smoke <engine>\n";
+        std::cerr << "Usage: nexoai_trt_smoke <engine>\n";
         return 2;
     }
     try {
-        cuajone::selectCudaDevice(0);
-        const auto file = cuajone::EngineFile::read(std::filesystem::path(argv[1]));
-        cuajone::TensorRtSession session(file, file.metadata().image_size);
+        nexoai::selectCudaDevice(0);
+        const auto file = nexoai::EngineFile::read(std::filesystem::path(argv[1]));
+        nexoai::TensorRtSession session(file, file.metadata().image_size);
         std::cout << "TensorRT engine inspected: input " << session.inputWidth() << 'x'
                   << session.inputHeight() << '\n';
 
@@ -28,11 +28,11 @@ int main(int argc, char** argv) {
             input[index] = std::sin(static_cast<float>(index) * 0.017F);
         }
 
-        const cuajone::InferenceOutput synchronous = session.infer(input);
+        const nexoai::InferenceOutput synchronous = session.infer(input);
         const std::vector<float> synchronous_copy(
             synchronous.values.begin(), synchronous.values.end());
         session.submit(input);
-        const cuajone::InferenceOutput asynchronous = session.collect();
+        const nexoai::InferenceOutput asynchronous = session.collect();
         if (asynchronous.values.size() != synchronous_copy.size()) {
             std::cerr << "Parity mismatch: output length differs between infer() and submit()+collect()\n";
             return 1;

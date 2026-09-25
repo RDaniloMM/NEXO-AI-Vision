@@ -1,11 +1,11 @@
-# Analítica de seguridad para cámaras IP de Cuajone
+# Analítica de seguridad para cámaras IP de NexoAI
 
 La ruta oficial de producción en Windows es el **MSI aprobado -> NexoAI Vision
 launcher -> `NexoAIVision.exe`**. El producto instalado ejecuta el runtime C++
 nativo y no depende de Python, PyTorch ni Ultralytics.
 
 `ppe_reportev2.py` es un facade local de desarrollo/QA. Usa
-`cuajone_native.pyd` con modelos ONNX dinámicos acotados para ejercitar captura RTSP, binding
+`nexoai_native.pyd` con modelos ONNX dinámicos acotados para ejercitar captura RTSP, binding
 nativo, evidencias y reportes compatibles. No es un fallback operativo y no se
 incluye en el MSI.
 
@@ -31,7 +31,7 @@ está en [`installer/native/README.md`](installer/native/README.md).
 
 ## QA local con Python
 
-La ruta Python requiere 3.12 y un `cuajone_native.pyd` compilado localmente. El
+La ruta Python requiere 3.12 y un `nexoai_native.pyd` compilado localmente. El
 binding, Python, los modelos, fixtures y resultados de QA permanecen fuera del MSI.
 
 ```powershell
@@ -57,7 +57,7 @@ permanece fuera de Git.
 La configuración mínima de QA es:
 
 ```dotenv
-CAMERA_ID=CAM_CUAJONE_01
+CAMERA_ID=CAM_NEXOAI_01
 RTSP_URL=rtsp://CAMERA_HOST/axis-media/media.amp
 ANALYTICS_MODE=ppe-only
 PPE_ONNX_PATH=models/ppe.onnx
@@ -73,8 +73,8 @@ La referencia completa está en
 
 ## Binding local
 
-`cuajone_native.pyd` se construye con
-`CUAJONE_BUILD_PYTHON_BINDINGS=ON`. Su salida válida permanece bajo
+`nexoai_native.pyd` se construye con
+`NEXOAI_BUILD_PYTHON_BINDINGS=ON`. Su salida válida permanece bajo
 `.tools\native\build\presets\python-bindings\python`; nunca debe copiarse a staging
 ni al MSI. `ppe_reportev2.py` descubre automáticamente esa salida y las DLL locales
 conocidas cuando existen. Consulta
@@ -177,7 +177,7 @@ cerrar y falla el monitor si el writer entra en estado terminal.
 
 La antigua analítica `.pt`/`.engine`, selección PyTorch CUDA y ByteTrack de
 Ultralytics vive
-explícitamente en `cuajone_qa/experimental/legacy_ultralytics.py`. Se conserva para
+explícitamente en `nexoai_qa/experimental/legacy_ultralytics.py`. Se conserva para
 compatibilidad de experimentos y caracterización, no como ruta de producción ni
 como implementación del facade raíz.
 

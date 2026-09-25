@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/launcher_support.hpp"
+#include "nexoai/launcher_support.hpp"
 #include "platform_paths.hpp"
 
 #include <algorithm>
@@ -15,7 +15,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace cuajone::launcher {
+namespace nexoai::launcher {
 namespace {
 
 constexpr wchar_t kSavedCameraCredentialTargetPrefix[] = L"NexoAI Vision/RTSP/";
@@ -1044,4 +1044,4 @@ std::string redactRtspCredentials(std::string_view text) {
     return result;
 }
 
-}  // namespace cuajone::launcher
+}  // namespace nexoai::launcher

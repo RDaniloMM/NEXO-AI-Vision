@@ -10,8 +10,8 @@
 #include <netdb.h>
 #endif
 
-#include "cuajone/capture.hpp"
-#include "cuajone/cli.hpp"
+#include "nexoai/capture.hpp"
+#include "nexoai/cli.hpp"
 
 #include <cstdint>
 #include <iostream>
@@ -21,7 +21,7 @@
 
 namespace {
 
-using namespace cuajone;
+using namespace nexoai;
 
 void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);

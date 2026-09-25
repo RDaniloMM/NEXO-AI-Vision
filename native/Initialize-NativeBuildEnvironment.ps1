@@ -81,7 +81,6 @@ foreach ($entry in $wheelLayouts.GetEnumerator()) {
 }
 
 & (Join-Path $PSScriptRoot 'Provision-TrackingDependencies.ps1')
-& (Join-Path $PSScriptRoot 'Provision-Resvg.ps1')
 if (-not $SkipWix) {
     $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
     if ($null -eq $dotnet) { throw 'Install .NET SDK 8.0.423 or invoke this script with -SkipWix.' }

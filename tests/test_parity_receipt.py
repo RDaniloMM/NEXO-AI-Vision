@@ -6,8 +6,8 @@ from copy import deepcopy
 
 import pytest
 
-from cuajone_qa.contracts import validate_instance
-from cuajone_qa.parity import EXPECTED_STAGE_NAMES, build_authorized_receipt
+from nexoai_qa.contracts import validate_instance
+from nexoai_qa.parity import EXPECTED_STAGE_NAMES, build_authorized_receipt
 
 
 def authorized_stages() -> list[dict[str, object]]:

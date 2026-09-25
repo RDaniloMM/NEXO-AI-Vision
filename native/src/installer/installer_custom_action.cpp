@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/compute.hpp"
+#include "nexoai/compute.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -35,16 +35,16 @@ std::wstring wide(std::string_view value) {
 
 extern "C" __declspec(dllexport) UINT __stdcall DetectComputeHardware(MSIHANDLE installation) noexcept {
     try {
-        const cuajone::HardwareProbeResult probe = cuajone::probeHardware();
+        const nexoai::HardwareProbeResult probe = nexoai::probeHardware();
         setProperty(
             installation,
             L"NVIDIA_STATUS",
-            wide(cuajone::hardwareProbeStatusName(probe.status)));
+            wide(nexoai::hardwareProbeStatusName(probe.status)));
         setProperty(
             installation,
             L"CUDA_READY",
-            probe.status == cuajone::HardwareProbeStatus::CudaReady ? L"1" : L"0");
-        setProperty(installation, L"CUDA_DETAILS", wide(cuajone::hardwareProbeSummary(probe)));
+            probe.status == nexoai::HardwareProbeStatus::CudaReady ? L"1" : L"0");
+        setProperty(installation, L"CUDA_DETAILS", wide(nexoai::hardwareProbeSummary(probe)));
         return ERROR_SUCCESS;
     } catch (...) {
         MsiSetPropertyW(installation, L"NVIDIA_STATUS", L"probe_error");

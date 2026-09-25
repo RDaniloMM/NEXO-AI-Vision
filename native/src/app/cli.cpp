@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/cli.hpp"
-#include "cuajone/yolo_decode.hpp"
+#include "nexoai/cli.hpp"
+#include "nexoai/yolo_decode.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -15,7 +15,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 constexpr std::size_t kMaximumEvidenceWriterQueueCapacity = 4096;
@@ -552,4 +552,4 @@ void validateRtspSource(const std::string& source) {
     if (isRtspSource(source)) static_cast<void>(parseRtspAuthority(source));
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

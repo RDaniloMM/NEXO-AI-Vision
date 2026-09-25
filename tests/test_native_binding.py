@@ -11,15 +11,15 @@ import sys
 import numpy as np
 import pytest
 
-from cuajone_qa.backends.experimental import ExperimentalBackend
-from cuajone_qa.backends.native import NativeBackend
-from cuajone_qa.canonical import canonical_json, safe_source_id
-from cuajone_qa.config import QaRuntimeConfig
-from cuajone_qa.contracts import runtime_defaults
-from cuajone_qa.ppe import PPE_ITEMS
-from cuajone_qa.parity import normalize_track_identities, run_synthetic_parity, synthetic_frames
+from nexoai_qa.backends.experimental import ExperimentalBackend
+from nexoai_qa.backends.native import NativeBackend
+from nexoai_qa.canonical import canonical_json, safe_source_id
+from nexoai_qa.config import QaRuntimeConfig
+from nexoai_qa.contracts import runtime_defaults
+from nexoai_qa.ppe import PPE_ITEMS
+from nexoai_qa.parity import normalize_track_identities, run_synthetic_parity, synthetic_frames
 
-native = pytest.importorskip("cuajone_native")
+native = pytest.importorskip("nexoai_native")
 
 
 def binding_config() -> QaRuntimeConfig:
@@ -81,10 +81,10 @@ import os
 
 dll_handles = [
     os.add_dll_directory(path)
-    for path in os.environ.get("CUAJONE_NATIVE_DLL_DIRS", "").split(os.pathsep)
+    for path in os.environ.get("NEXOAI_NATIVE_DLL_DIRS", "").split(os.pathsep)
     if path
 ]
-import cuajone_native as native
+import nexoai_native as native
 
 mode = sys.argv[1]
 models = Path(sys.argv[2])
@@ -176,7 +176,7 @@ def test_binding_v1_projection_remains_helmet_and_vest_only() -> None:
         _seven_item_frame({"gloves"})
     )
     assert result.frame_result["people"][0]["ppe_status"] == "EPP Completo"
-    assert result.events[0]["type"] == "com.cuajone.safety.ppe.violation.v1"
+    assert result.events[0]["type"] == "com.nexoai.safety.ppe.violation.v1"
     assert result.events[0]["data"]["status"] == "EPP Completo"
 
 

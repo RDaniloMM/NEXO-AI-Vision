@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/onnx_session.hpp"
-#include "cuajone/engine_pipeline.hpp"
+#include "nexoai/onnx_session.hpp"
+#include "nexoai/engine_pipeline.hpp"
 
 #include "onnx_fixture.hpp"
 
@@ -14,8 +14,8 @@
 
 namespace {
 
-using namespace cuajone;
-using namespace cuajone::test;
+using namespace nexoai;
+using namespace nexoai::test;
 
 void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
@@ -209,9 +209,9 @@ std::string dynamicManifest(std::string_view role = "ppe", std::size_t schema_ve
     const std::string output_shape = role == "ppe"
         ? R"([1,12,"predictions"])" : "[1,300,57]";
     const std::string provenance = schema_version == 3
-        ? R"({"source_uri":"urn:cuajone:test","exporter":"tests","license":"AGPL-3.0-only","source_checkpoint":{"filename":"model.pt","sha256":")"
+        ? R"({"source_uri":"urn:nexoai:test","exporter":"tests","license":"AGPL-3.0-only","source_checkpoint":{"filename":"model.pt","sha256":")"
             + std::string(64, '0') + R"("}})"
-        : R"({"source_uri":"urn:cuajone:test","exporter":"tests","license":"AGPL-3.0-only"})";
+        : R"({"source_uri":"urn:nexoai:test","exporter":"tests","license":"AGPL-3.0-only"})";
     return R"({"schema_version":)" + std::to_string(schema_version) + R"(,"artifact_type":"onnx","role":")"
         + std::string(role)
         + R"(","model_file":"model.onnx","model_sha256":")"

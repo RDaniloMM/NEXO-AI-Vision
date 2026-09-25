@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cuajone.example/contracts/v1/frame-result.schema.json",
-  "title": "Cuajone canonical frame result v1",
+  "$id": "https://nexoai.example/contracts/v1/frame-result.schema.json",
+  "title": "NexoAI canonical frame result v1",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract_version", "source_id", "frame_id", "monotonic_timestamp_ms", "observed_at", "frame", "people", "events"],

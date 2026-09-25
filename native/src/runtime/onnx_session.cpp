@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/onnx_session.hpp"
-#include "cuajone/resource_limits.hpp"
+#include "nexoai/onnx_session.hpp"
+#include "nexoai/resource_limits.hpp"
 
 #include <onnxruntime_cxx_api.h>
 
@@ -10,7 +10,7 @@
 #include <string>
 #include <utility>
 
-namespace cuajone {
+namespace nexoai {
 struct OnnxSession::Impl {
     Impl(
         const std::filesystem::path& model_path,
@@ -159,4 +159,4 @@ const std::vector<std::int64_t>& OnnxSession::outputShape() const noexcept { ret
 const OnnxModelManifest& OnnxSession::manifest() const noexcept { return impl_->verified_model.manifest; }
 InferenceOutput OnnxSession::infer(std::span<const float> input) { return impl_->run(input); }
 
-}  // namespace cuajone
+}  // namespace nexoai

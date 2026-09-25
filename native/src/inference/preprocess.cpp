@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/preprocess.hpp"
-#include "cuajone/resource_limits.hpp"
+#include "nexoai/preprocess.hpp"
+#include "nexoai/resource_limits.hpp"
 
 #include <opencv2/imgproc.hpp>
 
 #include <cmath>
 #include <stdexcept>
 
-namespace cuajone {
+namespace nexoai {
 
 LetterboxPreprocessor::LetterboxPreprocessor(int model_width, int model_height)
     : model_width_(model_width), model_height_(model_height) {
@@ -81,4 +81,4 @@ PreprocessedFrame LetterboxPreprocessor::process(const cv::Mat& bgr_frame) {
     };
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

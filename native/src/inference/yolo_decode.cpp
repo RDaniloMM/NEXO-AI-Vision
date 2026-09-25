@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/yolo_decode.hpp"
+#include "nexoai/yolo_decode.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <tuple>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 struct Shape2D {
@@ -555,4 +555,4 @@ std::vector<PoseDetection> classAwarePoseNms(
     return nms(std::move(detections), iou_threshold);
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

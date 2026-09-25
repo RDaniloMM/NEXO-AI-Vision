@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "cuajone/model_manifest.hpp"
+#include "nexoai/model_manifest.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -20,7 +20,7 @@
 #include <string_view>
 #include <vector>
 
-namespace cuajone::test {
+namespace nexoai::test {
 
 using Bytes = std::vector<std::byte>;
 
@@ -84,7 +84,7 @@ inline Bytes identityModel(std::string_view node_domain = {}) {
 
     Bytes graph;
     appendBytesField(graph, 1, node);
-    appendStringField(graph, 2, "cuajone-synthetic");
+    appendStringField(graph, 2, "nexoai-synthetic");
     const Bytes input = valueInfo("input");
     const Bytes output = valueInfo("output");
     appendBytesField(graph, 11, input);
@@ -94,7 +94,7 @@ inline Bytes identityModel(std::string_view node_domain = {}) {
     appendVarintField(opset, 2, 21);
     Bytes model;
     appendVarintField(model, 1, 10);
-    appendStringField(model, 2, "cuajone-tests");
+    appendStringField(model, 2, "nexoai-tests");
     appendBytesField(model, 7, graph);
     appendBytesField(model, 8, opset);
     return model;
@@ -118,7 +118,7 @@ inline Bytes addModel() {
 
     Bytes graph;
     appendBytesField(graph, 1, node);
-    appendStringField(graph, 2, "cuajone-synthetic-cuda");
+    appendStringField(graph, 2, "nexoai-synthetic-cuda");
     appendBytesField(graph, 5, tensor);
     const Bytes input = valueInfo("input");
     const Bytes output = valueInfo("output");
@@ -129,7 +129,7 @@ inline Bytes addModel() {
     appendVarintField(opset, 2, 21);
     Bytes model;
     appendVarintField(model, 1, 10);
-    appendStringField(model, 2, "cuajone-tests");
+    appendStringField(model, 2, "nexoai-tests");
     appendBytesField(model, 7, graph);
     appendBytesField(model, 8, opset);
     return model;
@@ -148,7 +148,7 @@ inline Bytes constantPoseModel() {
     appendBytesField(tensor, 9, std::as_bytes(std::span(values)));
 
     Bytes graph;
-    appendStringField(graph, 2, "cuajone-synthetic-pose-contract");
+    appendStringField(graph, 2, "nexoai-synthetic-pose-contract");
     appendBytesField(graph, 5, tensor);
     const Bytes input = valueInfo("input", input_dimensions);
     const Bytes output = valueInfo("output", output_dimensions);
@@ -159,7 +159,7 @@ inline Bytes constantPoseModel() {
     appendVarintField(opset, 2, 21);
     Bytes model;
     appendVarintField(model, 1, 10);
-    appendStringField(model, 2, "cuajone-tests");
+    appendStringField(model, 2, "nexoai-tests");
     appendBytesField(model, 7, graph);
     appendBytesField(model, 8, opset);
     return model;
@@ -173,8 +173,8 @@ inline std::string poseManifest(const std::filesystem::path& model_path, const B
         + ",\"external_data\":false,\"custom_operators\":false,"
           "\"input\":{\"name\":\"input\",\"element_type\":\"float32\",\"shape\":[1,3,640,640]},"
           "\"output\":{\"name\":\"output\",\"element_type\":\"float32\",\"shape\":[1,1,56]},"
-          "\"provenance\":{\"source_uri\":\"urn:cuajone:synthetic-pose-contract\","
-          "\"exporter\":\"cuajone-tests\",\"license\":\"AGPL-3.0-only\"}}";
+          "\"provenance\":{\"source_uri\":\"urn:nexoai:synthetic-pose-contract\","
+          "\"exporter\":\"nexoai-tests\",\"license\":\"AGPL-3.0-only\"}}";
 }
 
 inline Bytes externalDataModel() {
@@ -196,7 +196,7 @@ class TemporaryDirectory {
 public:
     TemporaryDirectory() {
         path_ = std::filesystem::temp_directory_path()
-            / ("cuajone_onnx_tests_" + std::to_string(GetCurrentProcessId()));
+            / ("nexoai_onnx_tests_" + std::to_string(GetCurrentProcessId()));
         std::error_code ignored;
         std::filesystem::remove_all(path_, ignored);
         std::filesystem::create_directory(path_);
@@ -244,8 +244,8 @@ inline std::string manifest(
         + "\"input\":{\"name\":\"" + std::string(input_name)
         + "\",\"element_type\":\"float32\",\"shape\":[1,3,2,2]},"
           "\"output\":{\"name\":\"output\",\"element_type\":\"float32\",\"shape\":[1,3,2,2]},"
-          "\"provenance\":{\"source_uri\":\"urn:cuajone:synthetic-test\","
-          "\"exporter\":\"cuajone-tests\",\"license\":\"AGPL-3.0-only\"}"
+          "\"provenance\":{\"source_uri\":\"urn:nexoai:synthetic-test\","
+          "\"exporter\":\"nexoai-tests\",\"license\":\"AGPL-3.0-only\"}"
         + std::string(extra_root) + "}";
 }
 
@@ -261,4 +261,4 @@ inline std::filesystem::path writeModelSet(
     return path;
 }
 
-}  // namespace cuajone::test
+}  // namespace nexoai::test

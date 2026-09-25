@@ -5,13 +5,13 @@ param(
     [Parameter(Mandatory)]
     [string]$FilePath,
 
-    [string]$SignToolPath = $env:CUAJONE_SIGNTOOL_PATH,
-    [string]$TimestampUrl = $env:CUAJONE_TIMESTAMP_URL,
-    [string]$CertificateThumbprint = $env:CUAJONE_CERTIFICATE_SHA1,
-    [string]$TrustedSigningDlib = $env:CUAJONE_TRUSTED_SIGNING_DLIB,
-    [string]$TrustedSigningMetadata = $env:CUAJONE_TRUSTED_SIGNING_METADATA,
-    [switch]$AllowInternalPilotTrust = ($env:CUAJONE_ALLOW_INTERNAL_PILOT_TRUST -ceq "1"),
-    [string]$PilotRootCertificatePath = $env:CUAJONE_PILOT_ROOT_CER,
+    [string]$SignToolPath = $env:NEXOAI_SIGNTOOL_PATH,
+    [string]$TimestampUrl = $env:NEXOAI_TIMESTAMP_URL,
+    [string]$CertificateThumbprint = $env:NEXOAI_CERTIFICATE_SHA1,
+    [string]$TrustedSigningDlib = $env:NEXOAI_TRUSTED_SIGNING_DLIB,
+    [string]$TrustedSigningMetadata = $env:NEXOAI_TRUSTED_SIGNING_METADATA,
+    [switch]$AllowInternalPilotTrust = ($env:NEXOAI_ALLOW_INTERNAL_PILOT_TRUST -ceq "1"),
+    [string]$PilotRootCertificatePath = $env:NEXOAI_PILOT_ROOT_CER,
     [switch]$VerifyOnly
 )
 
@@ -35,7 +35,7 @@ function Assert-InternalPilotSignature(
         throw "Internal pilot root must be supplied as a public .cer file"
     }
     if ($ExpectedThumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
-        throw "Internal pilot verification requires CUAJONE_CERTIFICATE_SHA1"
+        throw "Internal pilot verification requires NEXOAI_CERTIFICATE_SHA1"
     }
     if ($null -eq $Signature.SignerCertificate -or
         $Signature.SignerCertificate.Thumbprint -cne $ExpectedThumbprint) {
@@ -136,16 +136,16 @@ $target = (Resolve-Path -LiteralPath $FilePath).Path
 $extension = [System.IO.Path]::GetExtension($target).ToLowerInvariant()
 $leafName = Split-Path -Leaf $target
 if ($extension -cne ".msi" -and
-    $leafName -notin @("NexoAIVisionLauncher.exe", "NexoAIVision.exe", "CuajoneHardwareProbeCA.dll")) {
-    throw "Only NexoAIVisionLauncher.exe, NexoAIVision.exe, CuajoneHardwareProbeCA.dll, and MSI files may be signed: $target"
+    $leafName -notin @("NexoAIVisionLauncher.exe", "NexoAIVision.exe", "NexoAIHardwareProbeCA.dll")) {
+    throw "Only NexoAIVisionLauncher.exe, NexoAIVision.exe, NexoAIHardwareProbeCA.dll, and MSI files may be signed: $target"
 }
 
 if ($AllowInternalPilotTrust -and [string]::IsNullOrWhiteSpace($PilotRootCertificatePath)) {
-    throw "Internal pilot trust requires CUAJONE_PILOT_ROOT_CER or -PilotRootCertificatePath"
+    throw "Internal pilot trust requires NEXOAI_PILOT_ROOT_CER or -PilotRootCertificatePath"
 }
 if ($AllowInternalPilotTrust) {
     if ($CertificateThumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
-        throw "Internal pilot trust requires CUAJONE_CERTIFICATE_SHA1"
+        throw "Internal pilot trust requires NEXOAI_CERTIFICATE_SHA1"
     }
     if (-not [string]::IsNullOrWhiteSpace($TrustedSigningDlib) -or
         -not [string]::IsNullOrWhiteSpace($TrustedSigningMetadata)) {

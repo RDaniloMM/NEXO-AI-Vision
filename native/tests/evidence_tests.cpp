@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/evidence.hpp"
-#include "cuajone/ppe_analytics.hpp"
+#include "nexoai/evidence.hpp"
+#include "nexoai/ppe_analytics.hpp"
 
 #include <opencv2/core.hpp>
 
@@ -22,7 +22,7 @@
 
 namespace {
 
-using namespace cuajone;
+using namespace nexoai;
 
 void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
@@ -82,7 +82,7 @@ public:
     explicit TemporaryDirectory(std::string name) {
         const auto token = std::chrono::steady_clock::now().time_since_epoch().count();
         path_ = std::filesystem::temp_directory_path()
-            / ("cuajone,evidence-contract-" + std::move(name) + "-" + std::to_string(token));
+            / ("nexoai,evidence-contract-" + std::move(name) + "-" + std::to_string(token));
         std::filesystem::create_directories(path_);
     }
     ~TemporaryDirectory() {
@@ -118,7 +118,7 @@ CanonicalEvent event(
             present ? "ASSOCIATED_REGION" : "NO_ASSOCIATED_DETECTION"});
     }
     return {
-        std::move(id), "urn:cuajone:camera:CAM_01", std::move(type), std::move(time),
+        std::move(id), "urn:nexoai:camera:CAM_01", std::move(type), std::move(time),
         "track/" + std::to_string(track_id), 1, 100, track_id, std::move(status), confidence, ppe,
     };
 }
@@ -128,7 +128,7 @@ void testExactContractAndAppendBehavior() {
     const cv::Mat frame(24, 32, CV_8UC3, cv::Scalar(10, 20, 30));
     const std::string camera = "CAM/01, \"Norte\"";
     const auto first_event = event(
-        "evt-CAM-12345678", "com.cuajone.safety.ppe.violation.v2",
+        "evt-CAM-12345678", "com.nexoai.safety.ppe.violation.v2",
         "2026-01-02T03:04:05.678901Z", "Falta: Vest", 42, 0.875F, {PpeItem::Vest});
 
     EvidenceWriter writer(temporary.path());
@@ -148,7 +148,7 @@ void testExactContractAndAppendBehavior() {
         "Initial v2 operator CSV does not expose all seven PPE states");
 
     const EvidenceRecord second = writer.append(frame, "CAM_01", event(
-        "evt-CAM-ABCDEFGH", "com.cuajone.safety.fall.possible.v2",
+        "evt-CAM-ABCDEFGH", "com.nexoai.safety.fall.possible.v2",
         "2026-01-02T03:04:06Z", "Evaluando EPP", 7, 0.9F, {}, false));
     require(std::all_of(second.ppe_states.begin(), second.ppe_states.end(),
                 [](const std::string& value) { return value == "N/D"; })
@@ -160,7 +160,7 @@ void testExactContractAndAppendBehavior() {
 
     EvidenceWriter reopened(temporary.path());
     const EvidenceRecord third = reopened.append(frame, "CAM_01", event(
-        "evt-CAM-IJKLMNOP", "com.cuajone.safety.ppe.violation.v2",
+        "evt-CAM-IJKLMNOP", "com.nexoai.safety.ppe.violation.v2",
         "2026-01-02T03:04:07.1Z", "Falta: Hard_hat", 8, 1.0F, {PpeItem::HardHat}));
     require(third.ppe_states[static_cast<std::size_t>(PpeItem::HardHat)] == "NO"
             && third.ppe_states[static_cast<std::size_t>(PpeItem::Vest)] == "SI",
@@ -182,7 +182,7 @@ void testMissingItemProjectionUsesViolationStatesOnly() {
     TemporaryDirectory temporary("missing-projection");
     const cv::Mat frame(24, 32, CV_8UC3, cv::Scalar(10, 20, 30));
     CanonicalEvent value = event(
-        "evt-CAM-MISSING1", "com.cuajone.safety.ppe.violation.v2",
+        "evt-CAM-MISSING1", "com.nexoai.safety.ppe.violation.v2",
         "2026-01-02T03:04:05.000Z", "Falta: Safety_boots;Vest", 42, 0.875F,
         {PpeItem::SafetyBoots, PpeItem::Vest});
     auto& not_verifiable = value.ppe->items[static_cast<std::size_t>(PpeItem::Gloves)];
@@ -207,7 +207,7 @@ void testMalformedTimestampDoesNotWrite() {
     const cv::Mat frame(8, 8, CV_8UC3, cv::Scalar(1, 2, 3));
     requireThrows([&] {
         writer.append(frame, "CAM_01", event(
-            "evt-invalid-time", "com.cuajone.safety.ppe.violation.v2",
+            "evt-invalid-time", "com.nexoai.safety.ppe.violation.v2",
             "2026-02-30T25:61:00Z", "Falta Casco", 1, 0.5F));
     }, "Malformed canonical timestamp was accepted");
     require(!std::filesystem::exists(
@@ -222,7 +222,7 @@ void testImageFailureDoesNotCreatePartialCsvRow() {
     EvidenceWriter writer(temporary.path());
     requireThrows([&] {
         writer.append(cv::Mat{}, "CAM_01", event(
-            "evt-empty-frame", "com.cuajone.safety.fall.possible.v2",
+            "evt-empty-frame", "com.nexoai.safety.fall.possible.v2",
             "2026-01-02T03:04:05.000Z", "En evaluaci\xC3\xB3n", 2, 0.4F));
     }, "Empty evidence frame was accepted");
     require(!std::filesystem::exists(
@@ -240,7 +240,7 @@ void testCsvWriteFailureIsReported() {
     const cv::Mat frame(8, 8, CV_8UC3, cv::Scalar(1, 2, 3));
     requireThrows([&] {
         writer.append(frame, "CAM_01", event(
-            "evt-csv-failure", "com.cuajone.safety.ppe.violation.v2",
+            "evt-csv-failure", "com.nexoai.safety.ppe.violation.v2",
             "2026-01-02T03:04:05.000Z", "Sin Casco y Chaleco", 3, 0.7F));
     }, "CSV path failure was not reported");
     require(!std::filesystem::is_regular_file(
@@ -273,18 +273,18 @@ void testWriterQueueFifoBlockingAndCloneLifetime() {
     cv::Mat frame(8, 8, CV_8UC3, cv::Scalar(10, 20, 30));
     const auto clone = EvidenceWriterQueue::cloneAnnotatedFrame(frame);
     require(queue.enqueue(clone, "CAM_01", event(
-        "evt-fifo-1", "com.cuajone.safety.fall.possible.v2", "2026-01-02T03:04:05Z", "fall", 1, 0.8F)),
+        "evt-fifo-1", "com.nexoai.safety.fall.possible.v2", "2026-01-02T03:04:05Z", "fall", 1, 0.8F)),
         "First queued event was rejected");
     first_started.get_future().wait();
     require(queue.enqueue(clone, "CAM_01", event(
-        "evt-fifo-2", "com.cuajone.safety.fall.possible.v2", "2026-01-02T03:04:06Z", "fall", 2, 0.8F)),
+        "evt-fifo-2", "com.nexoai.safety.fall.possible.v2", "2026-01-02T03:04:06Z", "fall", 2, 0.8F)),
         "Second queued event was rejected");
     frame.setTo(cv::Scalar(99, 99, 99));
     std::promise<void> enqueue_entered;
     std::thread blocked([&] {
         enqueue_entered.set_value();
         const bool accepted = queue.enqueue(clone, "CAM_01", event(
-            "evt-fifo-3", "com.cuajone.safety.fall.possible.v2", "2026-01-02T03:04:07Z", "fall", 3, 0.8F));
+            "evt-fifo-3", "com.nexoai.safety.fall.possible.v2", "2026-01-02T03:04:07Z", "fall", 3, 0.8F));
         require(accepted, "Full queue dropped the newest event");
     });
     enqueue_entered.get_future().wait();
@@ -318,11 +318,11 @@ void testWriterQueueTerminalFailuresAreAccounted() {
         const auto clone = EvidenceWriterQueue::cloneAnnotatedFrame(
             cv::Mat(4, 4, CV_8UC3, cv::Scalar(1, 2, 3)));
         require(queue.enqueue(clone, "CAM_01", event(
-            "evt-" + stage + "-1", "com.cuajone.safety.ppe.violation.v2", "2026-01-02T03:04:05Z", "missing", 1, 0.8F)),
+            "evt-" + stage + "-1", "com.nexoai.safety.ppe.violation.v2", "2026-01-02T03:04:05Z", "missing", 1, 0.8F)),
             "First failing job was not accepted");
         first_started.get_future().wait();
         require(queue.enqueue(clone, "CAM_01", event(
-            "evt-" + stage + "-2", "com.cuajone.safety.ppe.violation.v2", "2026-01-02T03:04:06Z", "missing", 2, 0.8F)),
+            "evt-" + stage + "-2", "com.nexoai.safety.ppe.violation.v2", "2026-01-02T03:04:06Z", "missing", 2, 0.8F)),
             "Accepted job before terminal failure was rejected");
         release_first.set_value();
         queue.drainAndStop();
@@ -330,7 +330,7 @@ void testWriterQueueTerminalFailuresAreAccounted() {
         require(stats.accepted == 2 && stats.written == 0 && stats.failed == 2 && stats.terminal_failure,
             "Terminal writer failure did not account for every accepted job");
         require(!queue.enqueue(clone, "CAM_01", event(
-                    "evt-" + stage + "-3", "com.cuajone.safety.ppe.violation.v2", "2026-01-02T03:04:07Z", "missing", 3, 0.8F)),
+                    "evt-" + stage + "-3", "com.nexoai.safety.ppe.violation.v2", "2026-01-02T03:04:07Z", "missing", 3, 0.8F)),
             "Terminal queue accepted a later job");
         const std::string ledger = readBytes(temporary.path() / "evidence_writer_failures.jsonl");
         require(ledger.find("\"stage\":\"" + stage + "\"") != std::string::npos
@@ -353,7 +353,7 @@ void testWriterQueueRedactsImageFailureDetails() {
     const auto clone = EvidenceWriterQueue::cloneAnnotatedFrame(
         cv::Mat(4, 4, CV_8UC3, cv::Scalar(1, 2, 3)));
     require(queue.enqueue(clone, secret, event(
-                event_id, "com.cuajone.safety.ppe.violation.v2", "2026-01-02T03:04:05Z",
+                event_id, "com.nexoai.safety.ppe.violation.v2", "2026-01-02T03:04:05Z",
                 "missing", 1, 0.8F)),
         "Failing image-write job was not accepted");
     queue.drainAndStop();

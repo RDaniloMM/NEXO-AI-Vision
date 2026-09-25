@@ -2,7 +2,7 @@
 
 #pragma once
 
-namespace cuajone::platform {
+namespace nexoai::platform {
 
 struct ProcessStopPolicy {
     int graceful_timeout_ms{};
@@ -15,4 +15,4 @@ namespace detail {
 ProcessStopPolicy defaultProcessStopPolicy() noexcept;
 }
 
-}  // namespace cuajone::platform
+}  // namespace nexoai::platform

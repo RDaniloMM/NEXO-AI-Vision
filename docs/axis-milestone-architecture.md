@@ -1,7 +1,7 @@
 # Axis Edge and Milestone Integration Architecture
 
 This document separates repository facts from deployment recommendations. It does
-not assert that any Cuajone camera supports ACAP, a DLPU, containers, or an
+not assert that any NexoAI camera supports ACAP, a DLPU, containers, or an
 existing metadata producer without an exact camera and VMS inventory.
 
 The scored decision and reuse boundary are documented in the Spanish
@@ -27,7 +27,7 @@ integration endpoint.
 
 - The approved Windows production path is the MSI-installed NexoAI Vision launcher
   and `NexoAIVision.exe`; Python is not part of that deployment.
-- The local `ppe_reportev2.py` QA harness uses `cuajone_native.pyd` and fixed ONNX.
+- The local `ppe_reportev2.py` QA harness uses `nexoai_native.pyd` and fixed ONNX.
   Its `LatestFrameCapture` owns one decoder and one replaceable latest frame. There is
   no frame queue and no intentional accumulation of stale video.
 - `ppe-fall` and `ppe-only` delegate tracking and analytics to the native pipeline;

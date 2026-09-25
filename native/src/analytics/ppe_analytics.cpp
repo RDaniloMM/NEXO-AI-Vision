@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/ppe_analytics.hpp"
+#include "nexoai/ppe_analytics.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,7 +9,7 @@
 #include <numeric>
 #include <stdexcept>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 enum class AssociationRegion { HeadFace, Torso, HandsArms, LowerLegFeet };
@@ -413,4 +413,4 @@ void PpeAnalyzer::prune(std::chrono::steady_clock::time_point now) {
 
 void PpeAnalyzer::reset() noexcept { states_.clear(); }
 
-}  // namespace cuajone
+}  // namespace nexoai

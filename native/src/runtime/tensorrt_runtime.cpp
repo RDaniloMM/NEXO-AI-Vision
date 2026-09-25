@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/tensorrt_runtime.hpp"
-#include "cuajone/compute.hpp"
-#include "cuajone/resource_limits.hpp"
+#include "nexoai/tensorrt_runtime.hpp"
+#include "nexoai/compute.hpp"
+#include "nexoai/resource_limits.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -12,7 +12,7 @@
 
 static_assert(NV_TENSORRT_MAJOR == 11, "TensorRT major version 11 is required");
 
-namespace cuajone {
+namespace nexoai {
 
 void checkCuda(cudaError_t result, std::string_view operation) {
     if (result != cudaSuccess) {
@@ -377,4 +377,4 @@ DeviceSummary selectCudaDevice(std::optional<int> requested_device) {
     };
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

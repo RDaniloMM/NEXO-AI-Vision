@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/letterbox.hpp"
+#include "nexoai/letterbox.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 float clampCoordinate(float value, int maximum) noexcept {
@@ -57,4 +57,4 @@ LetterboxTransform makeLetterboxTransform(
     };
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

@@ -2,7 +2,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
-  <Package Id="CuajonePpeMonitor"
+  <Package Id="NexoAIVision"
            Name="NexoAI Vision"
            Manufacturer="NexoAI Vision Project"
            Language="1033"
@@ -32,14 +32,17 @@
                       Bitness="always64" />
     </Property>
     <Property Id="LEGACY_COMPUTE_MODE">
-      <RegistrySearch Id="PreviousCuajoneComputeMode"
+      <RegistrySearch Id="LegacyPpeMonitorComputeMode"
                       Root="HKLM"
-                      Key="SOFTWARE\Cuajone PPE Monitor"
+                      Key="SOFTWARE\NexoAI PPE Monitor"
                       Name="ComputeMode"
                       Type="raw"
                       Bitness="always64" />
     </Property>
     <Property Id="COMPUTE_MODE" Value="auto" Secure="yes" />
+    <!-- Default to preserving operator data. The uninstall dialog makes a
+         deliberate, visible choice necessary before the data tree is removed. -->
+    <Property Id="REMOVE_RUNTIME_DATA" Value="0" Secure="yes" />
     <SetProperty Id="COMPUTE_MODE" Action="RestoreLegacyComputeMode" Value="[LEGACY_COMPUTE_MODE]"
                  After="AppSearch" Sequence="both"
                  Condition="NOT PREVIOUS_COMPUTE_MODE AND LEGACY_COMPUTE_MODE AND COMPUTE_MODE=&quot;auto&quot;" />
@@ -68,6 +71,16 @@
                   Return="check" />
     <CustomAction Id="BlockUnavailableCuda"
                   Error="GPU (CUDA) mode requires a usable NVIDIA adapter, SM 7.5+, and CUDA Driver API 12.9+. Use COMPUTE_MODE=auto or COMPUTE_MODE=cpu; the MSI never installs display drivers." />
+    <CustomAction Id="PurgeRuntimeData"
+                  BinaryRef="Wix4UtilCA_X64"
+                  DllEntry="WixQuietExec64"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+    <SetProperty Id="PurgeRuntimeData"
+                 Value="&quot;[System64Folder]cmd.exe&quot; /d /s /c &quot;if exist &quot;&quot;[CommonAppDataFolder]NexoAI Vision\runtime&quot;&quot; rmdir /s /q &quot;&quot;[CommonAppDataFolder]NexoAI Vision\runtime&quot;&quot;&quot;"
+                 Before="PurgeRuntimeData"
+                 Sequence="execute" />
     <?if $(var.HasEngineBuilder)=1 ?>
     <CustomAction Id="BuildTensorRtEngines"
                   BinaryRef="Wix4UtilCA_X64"
@@ -93,6 +106,9 @@
       <Custom Action="BlockUnavailableCuda"
               After="DetectComputeHardware"
               Condition="NOT Installed AND COMPUTE_MODE=&quot;cuda&quot; AND CUDA_READY&lt;&gt;&quot;1&quot;" />
+      <Custom Action="PurgeRuntimeData"
+              Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND REMOVE_RUNTIME_DATA=&quot;1&quot;" />
       <?if $(var.HasEngineBuilder)=1 ?>
       <!-- Component_6cabd30d194a856b37d518e9 is the deterministic component that owns
            bin\engine-builder\Build-EnginesOnTarget.ps1 (SHA-256 of the lowercased
@@ -106,7 +122,7 @@
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
 
-    <UI Id="CuajoneComputeUI">
+    <UI Id="NexoAIComputeUI">
       <Dialog Id="ComputeDlg" Width="370" Height="270" Title="NexoAI Vision - Compute">
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="Next">
           <?if $(var.HasModels)=1 ?>
@@ -145,6 +161,10 @@
       </Dialog>
       <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="ComputeDlg"
                Order="5" Condition="NOT Installed" />
+      <!-- MaintenanceTypeDlg sets REMOVE=ALL. Run our dialog afterwards so
+           the selected data-retention policy is known before ProgressDlg. -->
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="RemoveDataDlg"
+               Order="2" Condition="1" />
       <?if $(var.HasModels)=1 ?>
       <Publish Dialog="CustomizeDlg" Control="Back" Event="NewDialog" Value="ComputeDlg" Order="1" />
       <Publish Dialog="CustomizeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="1" />
@@ -154,6 +174,35 @@
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="ComputeDlg"
                Order="3" Condition="NOT Installed" />
       <?endif?>
+      <Dialog Id="RemoveDataDlg" Width="370" Height="270" Title="NexoAI Vision - Uninstall">
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="Next">
+          <Publish Event="NewDialog" Value="ProgressDlg" />
+        </Control>
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="Back">
+          <Publish Event="NewDialog" Value="MaintenanceTypeDlg" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="260" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="Choose what to do with local data" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="30" Transparent="yes" NoPrefix="yes"
+                 Text="Choose whether the local configuration, logs, evidence and output are retained after NexoAI Vision is removed." />
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="373" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="373" Height="0" />
+        <Control Id="RetentionSelection" Type="RadioButtonGroup" X="25" Y="72" Width="320" Height="74"
+                 Property="REMOVE_RUNTIME_DATA">
+          <RadioButtonGroup Property="REMOVE_RUNTIME_DATA">
+            <RadioButton Value="0" X="0" Y="0" Width="320" Height="22"
+                         Text="Preserve local data (recommended)" />
+            <RadioButton Value="1" X="0" Y="34" Width="320" Height="30"
+                         Text="Delete all local data permanently" />
+          </RadioButtonGroup>
+        </Control>
+        <Control Id="DataPath" Type="Text" X="25" Y="158" Width="320" Height="48" NoPrefix="yes"
+                 Text="Data location: [CommonAppDataFolder]NexoAI Vision\runtime&#13;&#10;Deleting removes configuration, logs, evidence and output. This cannot be undone." />
+      </Dialog>
     </UI>
 
     <Feature Id="MainFeature" Title="NexoAI Vision" Level="1">

@@ -1,8 +1,8 @@
 ﻿#pragma code_page(65001)
 // SPDX-License-Identifier: AGPL-3.0-only
 #include <windows.h>
-#include "cuajone/launcher_resources.h"
-IDI_CUAJONE_ICON ICON "@CUAJONE_PRODUCT_ICON@"
+#include "nexoai/launcher_resources.h"
+IDI_NEXOAI_ICON ICON "@NEXOAI_PRODUCT_ICON@"
 
 IDD_CAMERA_PROFILE DIALOGEX 0, 0, 350, 350
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/evidence.hpp"
-#include "cuajone/ppe_analytics.hpp"
+#include "nexoai/evidence.hpp"
+#include "nexoai/ppe_analytics.hpp"
 
 #include <opencv2/imgcodecs.hpp>
 
@@ -29,7 +29,7 @@
 #include <thread>
 #include <vector>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 struct ParsedTimestamp {
@@ -126,8 +126,8 @@ std::string safeFilePart(std::string value) {
 }
 
 std::string operatorEventType(const std::string& canonical_type) {
-    if (canonical_type == "com.cuajone.safety.ppe.violation.v2") return "INCUMPLIMIENTO_EPP";
-    if (canonical_type == "com.cuajone.safety.fall.possible.v2") return "POSIBLE_CAIDA";
+    if (canonical_type == "com.nexoai.safety.ppe.violation.v2") return "INCUMPLIMIENTO_EPP";
+    if (canonical_type == "com.nexoai.safety.fall.possible.v2") return "POSIBLE_CAIDA";
     throw std::invalid_argument(
         "Unsupported canonical event type for operator evidence: " + canonical_type);
 }
@@ -305,7 +305,7 @@ std::string csvRow(const EvidenceRecord& record) {
 
 void validateWritableOutput(const std::filesystem::path& output) {
     std::filesystem::create_directories(output);
-    const auto probe = output / ".cuajone-write-probe.tmp";
+    const auto probe = output / ".nexoai-write-probe.tmp";
     {
         std::ofstream stream(probe, std::ios::binary | std::ios::trunc);
         if (!stream) {
@@ -406,7 +406,7 @@ EvidenceWriterV3::EvidenceWriterV3(std::filesystem::path output)
 }
 
 void EvidenceWriterV3::append(const CanonicalEvent& event) {
-    if (event.type != "com.cuajone.safety.ppe.violation.v2") {
+    if (event.type != "com.nexoai.safety.ppe.violation.v2") {
         throw std::invalid_argument("V3 operator report accepts only PPE violation events");
     }
     std::ofstream output(report_, std::ios::binary | std::ios::app);
@@ -429,7 +429,7 @@ struct EvidenceWriterQueue::Impl {
                             const CanonicalEvent& event, std::string& stage) {
             stage = "v2";
             writer->append(frame, label, event);
-            if (event.type == "com.cuajone.safety.ppe.violation.v2") {
+            if (event.type == "com.nexoai.safety.ppe.violation.v2") {
                 stage = "v3";
                 writer_v3->append(event);
             }
@@ -657,4 +657,4 @@ std::string EvidenceWriterQueue::failureMessage() const {
     return impl_->failure_message;
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

@@ -2,12 +2,12 @@
 
 #define NOMINMAX
 
-#include "cuajone/compute.hpp"
-#include "cuajone/contracts.hpp"
-#include "cuajone/engine_pipeline.hpp"
-#include "cuajone/onnx_session.hpp"
-#include "cuajone/performance_telemetry.hpp"
-#include "cuajone/yolo_decode.hpp"
+#include "nexoai/compute.hpp"
+#include "nexoai/contracts.hpp"
+#include "nexoai/engine_pipeline.hpp"
+#include "nexoai/onnx_session.hpp"
+#include "nexoai/performance_telemetry.hpp"
+#include "nexoai/yolo_decode.hpp"
 
 #include "onnx_fixture.hpp"
 
@@ -41,8 +41,8 @@ namespace {
 
 constexpr int kSkipped = 77;
 
-using namespace cuajone;
-using namespace cuajone::test;
+using namespace nexoai;
+using namespace nexoai::test;
 
 void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
@@ -60,17 +60,17 @@ std::string windowsError(DWORD code) {
 }
 
 std::filesystem::path cudaRuntimeDirectory() {
-    const DWORD required = GetEnvironmentVariableW(L"CUAJONE_ONNX_CUDA_RUNTIME_DIR", nullptr, 0);
+    const DWORD required = GetEnvironmentVariableW(L"NEXOAI_ONNX_CUDA_RUNTIME_DIR", nullptr, 0);
     if (required == 0) {
         throw std::runtime_error(
-            "CUDA provider runtime directory is not configured; set CUAJONE_ONNX_CUDA_RUNTIME_DIR "
+            "CUDA provider runtime directory is not configured; set NEXOAI_ONNX_CUDA_RUNTIME_DIR "
             "to the directory containing onnxruntime_providers_cuda.dll and its DLL closure");
     }
     std::wstring value(required, L'\0');
     const DWORD written = GetEnvironmentVariableW(
-        L"CUAJONE_ONNX_CUDA_RUNTIME_DIR", value.data(), static_cast<DWORD>(value.size()));
+        L"NEXOAI_ONNX_CUDA_RUNTIME_DIR", value.data(), static_cast<DWORD>(value.size()));
     if (written == 0 || written >= value.size()) {
-        throw std::runtime_error("Could not read CUAJONE_ONNX_CUDA_RUNTIME_DIR");
+        throw std::runtime_error("Could not read NEXOAI_ONNX_CUDA_RUNTIME_DIR");
     }
     value.resize(written);
     return value;
@@ -161,7 +161,7 @@ void verifyCudaProfile(
     const std::filesystem::path& model_path,
     const std::filesystem::path& profile_prefix,
     int device) {
-    Ort::Env environment(ORT_LOGGING_LEVEL_WARNING, "cuajone_onnx_cuda_integration");
+    Ort::Env environment(ORT_LOGGING_LEVEL_WARNING, "nexoai_onnx_cuda_integration");
     Ort::SessionOptions options;
     options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
@@ -285,7 +285,7 @@ void verifyNativePipeline(
         config.analytics.mode = AnalyticsMode::PpeFall;
         config.pose_requires_person = false;
         config.telemetry = &telemetry;
-#ifdef CUAJONE_INTERNAL_DIAGNOSTICS
+#ifdef NEXOAI_INTERNAL_DIAGNOSTICS
         config.force_serial_hybrid = force_serial_hybrid;
 #else
         static_cast<void>(force_serial_hybrid);
@@ -435,7 +435,7 @@ void runPpeOnly(const std::filesystem::path& ppe_model) {
 
     TemporaryDirectory directory;
     verifyCudaProfile(
-        ppe_model, directory.path() / L"cuajone_staged_ppe_cuda_profile", device);
+        ppe_model, directory.path() / L"nexoai_staged_ppe_cuda_profile", device);
     verifyPpeOnnxSessionContract(ppe_model, device);
 
     EnginePipelineConfig config;
@@ -528,7 +528,7 @@ int main(int argc, char** argv) {
         } else if (argc == 5 && std::string_view(argv[1]) == "pipeline") {
             runPipeline(argv[2], argv[3], argv[4]);
         } else {
-            throw std::invalid_argument("Usage: cuajone_onnx_cuda_integration_tests "
+            throw std::invalid_argument("Usage: nexoai_onnx_cuda_integration_tests "
                 "standalone-pose-cpu <pose.onnx> | ppe-only <ppe.onnx> | "
                 "dynamic-ppe <ppe.onnx> <imgsz> | "
                 "pipeline <ppe.onnx> <pose.onnx> <person-image>");

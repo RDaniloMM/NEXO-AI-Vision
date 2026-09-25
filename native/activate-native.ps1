@@ -10,14 +10,14 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $toolRoot = Join-Path $projectRoot ".tools\native"
 $vsRoot = "$toolRoot\vs"
-$cmakeBin = if (-not [string]::IsNullOrWhiteSpace($env:CUAJONE_CMAKE_BIN)) {
-    $env:CUAJONE_CMAKE_BIN
+$cmakeBin = if (-not [string]::IsNullOrWhiteSpace($env:NEXOAI_CMAKE_BIN)) {
+    $env:NEXOAI_CMAKE_BIN
 } elseif (Test-Path -LiteralPath "D:\Installations\CMake\bin\cmake.exe" -PathType Leaf) {
     "D:\Installations\CMake\bin"
 } else {
     $command = Get-Command cmake -ErrorAction SilentlyContinue
     if ($null -eq $command) {
-        throw "CMake was not found. Install it or set CUAJONE_CMAKE_BIN to its bin directory."
+        throw "CMake was not found. Install it or set NEXOAI_CMAKE_BIN to its bin directory."
     }
     Split-Path -Parent $command.Source
 }
@@ -30,6 +30,7 @@ $onnxRuntimeRoot = "$toolRoot\onnxruntime-win-x64-1.25.0"
 $openCvRoot = "$toolRoot\opencv\opencv\build"
 $openCvLib = "$openCvRoot\x64\vc16\lib"
 $openCvBin = "$openCvRoot\x64\vc16\bin"
+$qtRoot = "$toolRoot\qt\6.8.3\msvc2022_64"
 $tempRoot = "$toolRoot\temp"
 $vsDevCmd = "$vsRoot\Common7\Tools\VsDevCmd.bat"
 
@@ -40,7 +41,8 @@ $requiredPaths = @(
     "$onnxRuntimeRoot\include\onnxruntime_cxx_api.h",
     "$onnxRuntimeRoot\lib\onnxruntime.lib",
     "$onnxRuntimeRoot\lib\onnxruntime.dll",
-    "$openCvLib\OpenCVConfig.cmake"
+    "$openCvLib\OpenCVConfig.cmake",
+    "$qtRoot\lib\cmake\Qt6\Qt6Config.cmake"
 )
 if (-not $CpuOnly) {
     $requiredPaths += @(
@@ -62,20 +64,25 @@ $env:TEMP = $tempRoot
 $env:TMP = $tempRoot
 $env:ONNXRUNTIME_ROOT = $onnxRuntimeRoot
 $env:OpenCV_DIR = $openCvLib
+$env:CMAKE_PREFIX_PATH = $qtRoot
 if ($CpuOnly) {
     $env:TENSORRT_ROOT = $null
     $env:CUDA_RUNTIME_ROOT = $null
     $env:CUDA_COMPILER_HEADERS_ROOT = $null
     $env:CUDA_CCCL_HEADERS_ROOT = $null
-    $env:PATH = "$cmakeBin;$ninjaBin;$onnxRuntimeRoot\lib;$openCvBin;$env:PATH"
+    $env:PATH = "$cmakeBin;$ninjaBin;$qtRoot\bin;$onnxRuntimeRoot\lib;$openCvBin;$env:PATH"
 } else {
     $env:TENSORRT_ROOT = $tensorRtRoot
     $env:CUDA_RUNTIME_ROOT = $cudaRoot
     $env:CUDA_COMPILER_HEADERS_ROOT = $cudaCompilerHeadersRoot
     $env:CUDA_CCCL_HEADERS_ROOT = $cudaCcclHeadersRoot
-    $env:PATH = "$cmakeBin;$ninjaBin;$cudaRoot\bin;$tensorRtRoot\bin;$onnxRuntimeRoot\lib;$openCvBin;$env:PATH"
+    $env:PATH = "$cmakeBin;$ninjaBin;$qtRoot\bin;$cudaRoot\bin;$tensorRtRoot\bin;$onnxRuntimeRoot\lib;$openCvBin;$env:PATH"
 }
 
+# VsDevCmd exports a Windows PowerShell module path. Keep the current host's
+# PSModulePath so PowerShell 7 cmdlets (for example Get-FileHash in the MSI
+# builder) remain available after the native compiler environment is applied.
+$powerShellModulePath = $env:PSModulePath
 $developerEnvironment = @(
     & $env:ComSpec /d /s /c "call `"$vsDevCmd`" -arch=amd64 -host_arch=amd64 >nul && set"
 )
@@ -88,5 +95,6 @@ foreach ($entry in $developerEnvironment) {
         Set-Item -LiteralPath "Env:$($entry.Substring(0, $separator))" -Value $entry.Substring($separator + 1)
     }
 }
+$env:PSModulePath = $powerShellModulePath
 
-Write-Host "Cuajone native MSVC environment activated from $toolRoot (CPU only: $CpuOnly)"
+Write-Host "NexoAI native MSVC environment activated from $toolRoot (CPU only: $CpuOnly)"

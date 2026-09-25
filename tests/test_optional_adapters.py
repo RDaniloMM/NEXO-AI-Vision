@@ -8,8 +8,8 @@ from typing import Any
 
 import numpy as np
 
-from cuajone_qa.adapters.cvat import CvatAdapter
-from cuajone_qa.adapters.supervision import SupervisionAdapter
+from nexoai_qa.adapters.cvat import CvatAdapter
+from nexoai_qa.adapters.supervision import SupervisionAdapter
 
 
 class FakeTask:

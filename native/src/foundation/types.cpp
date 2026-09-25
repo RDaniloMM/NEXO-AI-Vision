@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/types.hpp"
+#include "nexoai/types.hpp"
 
 #include <algorithm>
 
-namespace cuajone {
+namespace nexoai {
 
 float boxArea(const Box& box) noexcept {
     return std::max(0.0F, box.x2 - box.x1) * std::max(0.0F, box.y2 - box.y1);
@@ -20,4 +20,4 @@ float intersectionOverUnion(const Box& lhs, const Box& rhs) noexcept {
     return union_area > 0.0F ? intersection / union_area : 0.0F;
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

@@ -47,7 +47,7 @@ congeladas las decisiones**:
 uv run python tools/compare_ppe_models.py `
   --baseline models/ppe-raw.onnx `
   --candidate models/ppe.onnx `
-  --data <dataset-cuajone.yaml> `
+  --data <dataset-nexoai.yaml> `
   --split test `
   --device cpu `
   --output artifacts/benchmarks/e2e-vs-raw.json

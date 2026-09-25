@@ -22,18 +22,18 @@ La estimación de implementación es de aproximadamente **280–440 horas de ing
 
 **Entregables descargables generados:**
 
-- [Descargar informe Markdown OpenSpec](sandbox:/mnt/data/cuajone_ai_agent_openspec/CAMARAS_IP_CUAJONE_AI_AGENT_OPEN_SPEC.md)
-- [Descargar bundle completo OpenSpec + Mermaid + scripts](sandbox:/mnt/data/CUAJONE_AI_AGENT_OPEN_SPEC_BUNDLE.zip)
-- [Descargar arquitectura Mermaid](sandbox:/mnt/data/cuajone_ai_agent_openspec/diagrams/architecture.mmd)
-- [Descargar cronograma Mermaid](sandbox:/mnt/data/cuajone_ai_agent_openspec/diagrams/implementation-gantt.mmd)
-- [Descargar scaffold de refactorización PowerShell](sandbox:/mnt/data/cuajone_ai_agent_openspec/scripts/refactor-scaffold.ps1)
-- [Descargar plantilla de benchmarking](sandbox:/mnt/data/cuajone_ai_agent_openspec/scripts/benchmark-template.ps1)
+- [Descargar informe Markdown OpenSpec](sandbox:/mnt/data/nexoai_ai_agent_openspec/CAMARAS_IP_NEXOAI_AI_AGENT_OPEN_SPEC.md)
+- [Descargar bundle completo OpenSpec + Mermaid + scripts](sandbox:/mnt/data/NEXOAI_AI_AGENT_OPEN_SPEC_BUNDLE.zip)
+- [Descargar arquitectura Mermaid](sandbox:/mnt/data/nexoai_ai_agent_openspec/diagrams/architecture.mmd)
+- [Descargar cronograma Mermaid](sandbox:/mnt/data/nexoai_ai_agent_openspec/diagrams/implementation-gantt.mmd)
+- [Descargar scaffold de refactorización PowerShell](sandbox:/mnt/data/nexoai_ai_agent_openspec/scripts/refactor-scaffold.ps1)
+- [Descargar plantilla de benchmarking](sandbox:/mnt/data/nexoai_ai_agent_openspec/scripts/benchmark-template.ps1)
 
 ## Estado del repositorio y plan de reestructuración
 
 ### Lo que ya existe y debe conservarse
 
-La organización actual es sólida: `native/` reúne librerías C++ de foundation, analytics, inference y runtime; `contracts/` contiene esquemas y fixtures versionados; `cuajone_qa/` mantiene QA y compatibilidad experimental; `tools/` incluye exportación, benchmarking y evaluación; y `installer/native/` concentra packaging, firma y release gates. La documentación del propio proyecto declara que la reorganización de fuentes C++ por dominios ya fue completada, por lo que otra reorganización meramente estética aportaría poco valor. fileciteturn5file0L2-L2
+La organización actual es sólida: `native/` reúne librerías C++ de foundation, analytics, inference y runtime; `contracts/` contiene esquemas y fixtures versionados; `nexoai_qa/` mantiene QA y compatibilidad experimental; `tools/` incluye exportación, benchmarking y evaluación; y `installer/native/` concentra packaging, firma y release gates. La documentación del propio proyecto declara que la reorganización de fuentes C++ por dominios ya fue completada, por lo que otra reorganización meramente estética aportaría poco valor. fileciteturn5file0L2-L2
 
 El runtime ya valida manifiestos, tamaños, hashes y contratos de modelos; limita tamaños máximos de manifest, ONNX, TensorRT, tensores e imágenes; y usa multiplicación/volúmenes comprobados para evitar desbordamientos o asignaciones absurdas provenientes de artefactos malformados. Es una buena base para un servicio expuesto a inputs no totalmente confiables. fileciteturn11file0L2-L2
 
@@ -66,7 +66,7 @@ Un punto importante es que el repositorio ya reutiliza streams y buffers en vari
 
 ### Libros de mayor utilidad práctica
 
-| Libro | Autor(es) | Año | Enfoque | Relevancia para Cuajone | Enlace |
+| Libro | Autor(es) | Año | Enfoque | Relevancia para NexoAI | Enlace |
 |---|---|---:|---|---|---|
 | *Parallel Programming: for Multicore and Cluster Systems*, 3.ª ed. | Thomas Rauber, Gudula Rünger | 2023 | Multicore, clusters, OpenMP, MPI, GPU, modelos de rendimiento | **Muy alta** para diseñar paralelismo CPU, pipeline y escalamiento multi-nodo | https://link.springer.com/book/10.1007/978-3-031-28924-8 citeturn9search0 |
 | *Programming Massively Parallel Processors*, 4.ª ed. | Wen-mei W. Hwu, David B. Kirk, Izzat El Hajj | 2022 | CUDA, jerarquía de memoria, streams, patrones GPU, DL | **Muy alta** para preprocessing GPU, CUDA y TensorRT | https://shop.elsevier.com/books/programming-massively-parallel-processors/hwu/978-0-323-91231-0 citeturn8search1 |
@@ -93,7 +93,7 @@ Mi orden sugerido de lectura sería **Gregg → Williams → Hwu/Kirk/El Hajj �
 | *Stereo Vision-Based Fall Prediction and Detection using Human Pose Estimation on the AMD Kria K26 SOM* | Ramesh et al. | 2026 | HPE y detección de caídas sobre hardware edge; descarta RGB tras obtener características | Interesante para privacidad y procesamiento edge | https://arxiv.org/abs/2606.12473 citeturn21academia2 |
 | *Real-time fall detection based on vision for low-power edge platforms* | Xia et al. | 2026 | Modelado temporal/físico de caída con arquitectura ligera | Refuerza la necesidad de información temporal y no sólo una pose estática | https://arxiv.org/abs/2607.12909 citeturn21academia3 |
 
-Los resultados numéricos de los papers EPP **no deben trasladarse directamente a Cuajone**: cada trabajo emplea datasets, cámaras, distancias, clases y criterios distintos. Por eso la métrica decisiva tiene que provenir de un conjunto de validación local, separado del entrenamiento.
+Los resultados numéricos de los papers EPP **no deben trasladarse directamente a NexoAI**: cada trabajo emplea datasets, cámaras, distancias, clases y criterios distintos. Por eso la métrica decisiva tiene que provenir de un conjunto de validación local, separado del entrenamiento.
 
 Para caídas, una recomendación importante es no convertir una sola caja “horizontal” o una única pose en una alerta definitiva. El repositorio ya apunta en la dirección correcta al usar keypoints, geometría, descenso, confirmación, recuperación y cooldown dentro de `fall_analytics`. fileciteturn6file0L2-L2 La literatura reciente también continúa tratando la caída como un fenómeno temporal/dinámico, no sólo como clasificación de imagen. citeturn21academia2turn21academia3
 
@@ -188,8 +188,8 @@ Un evento propuesto:
 ```json
 {
   "schema_version": "4",
-  "event_id": "CAM_CUAJONE_01:184427:fall-confirmed:v1",
-  "camera_id": "CAM_CUAJONE_01",
+  "event_id": "CAM_NEXOAI_01:184427:fall-confirmed:v1",
+  "camera_id": "CAM_NEXOAI_01",
   "frame_id": 184427,
   "observed_at": "2026-08-28T16:05:14.381-05:00",
   "type": "fall.confirmed",
@@ -202,7 +202,7 @@ Un evento propuesto:
   "policy_version": "fall-policy-3.1",
   "evidence_uri": "evidence://...",
   "agent": {
-    "node_id": "edge-cuajone-02",
+    "node_id": "edge-nexoai-02",
     "health": "SERVING"
   }
 }
@@ -638,11 +638,11 @@ A continuación, copiar los cuatro artefactos suministrados en el bundle y versi
 
 Los archivos preparados son:
 
-- **Informe Markdown completo:** [CAMARAS_IP_CUAJONE_AI_AGENT_OPEN_SPEC.md](sandbox:/mnt/data/cuajone_ai_agent_openspec/CAMARAS_IP_CUAJONE_AI_AGENT_OPEN_SPEC.md)
-- **Paquete OpenSpec completo:** [CUAJONE_AI_AGENT_OPEN_SPEC_BUNDLE.zip](sandbox:/mnt/data/CUAJONE_AI_AGENT_OPEN_SPEC_BUNDLE.zip)
-- **Arquitectura Mermaid:** [architecture.mmd](sandbox:/mnt/data/cuajone_ai_agent_openspec/diagrams/architecture.mmd)
-- **Gantt Mermaid:** [implementation-gantt.mmd](sandbox:/mnt/data/cuajone_ai_agent_openspec/diagrams/implementation-gantt.mmd)
-- **Script de scaffold:** [refactor-scaffold.ps1](sandbox:/mnt/data/cuajone_ai_agent_openspec/scripts/refactor-scaffold.ps1)
-- **Script de benchmarking:** [benchmark-template.ps1](sandbox:/mnt/data/cuajone_ai_agent_openspec/scripts/benchmark-template.ps1)
+- **Informe Markdown completo:** [CAMARAS_IP_NEXOAI_AI_AGENT_OPEN_SPEC.md](sandbox:/mnt/data/nexoai_ai_agent_openspec/CAMARAS_IP_NEXOAI_AI_AGENT_OPEN_SPEC.md)
+- **Paquete OpenSpec completo:** [NEXOAI_AI_AGENT_OPEN_SPEC_BUNDLE.zip](sandbox:/mnt/data/NEXOAI_AI_AGENT_OPEN_SPEC_BUNDLE.zip)
+- **Arquitectura Mermaid:** [architecture.mmd](sandbox:/mnt/data/nexoai_ai_agent_openspec/diagrams/architecture.mmd)
+- **Gantt Mermaid:** [implementation-gantt.mmd](sandbox:/mnt/data/nexoai_ai_agent_openspec/diagrams/implementation-gantt.mmd)
+- **Script de scaffold:** [refactor-scaffold.ps1](sandbox:/mnt/data/nexoai_ai_agent_openspec/scripts/refactor-scaffold.ps1)
+- **Script de benchmarking:** [benchmark-template.ps1](sandbox:/mnt/data/nexoai_ai_agent_openspec/scripts/benchmark-template.ps1)
 
 Las principales incógnitas que deben convertirse en parámetros antes del piloto —no en suposiciones de diseño— son **número de cámaras simultáneas, resolución/FPS, GPU/CPU y VRAM disponibles, presupuesto, VMS o sistema de alertas destino, latencia máxima admisible, política de almacenamiento de evidencias y requisitos legales/privacidad**. Hasta tenerlos, la decisión técnicamente más sólida es conservar una arquitectura portable, medir en el hardware real y hacer que batching, concurrencia, retención y backends sean perfiles configurables en lugar de valores codificados.

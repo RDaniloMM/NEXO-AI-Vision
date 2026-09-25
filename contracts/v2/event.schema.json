@@ -1,18 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cuajone.example/contracts/v2/event.schema.json",
-  "title": "Cuajone safety event CloudEvents 1.0 envelope v2",
+  "$id": "https://nexoai.example/contracts/v2/event.schema.json",
+  "title": "NexoAI safety event CloudEvents 1.0 envelope v2",
   "type": "object",
   "additionalProperties": false,
   "required": ["specversion", "id", "source", "type", "time", "datacontenttype", "dataschema", "subject", "contractversion", "data"],
   "properties": {
     "specversion": {"const": "1.0"},
     "id": {"type": "string", "pattern": "^evt-[A-Za-z0-9._:-]+$"},
-    "source": {"type": "string", "pattern": "^urn:cuajone:camera:[A-Za-z0-9._:-]+$"},
-    "type": {"enum": ["com.cuajone.safety.ppe.violation.v2", "com.cuajone.safety.fall.possible.v2"]},
+    "source": {"type": "string", "pattern": "^urn:nexoai:camera:[A-Za-z0-9._:-]+$"},
+    "type": {"enum": ["com.nexoai.safety.ppe.violation.v2", "com.nexoai.safety.fall.possible.v2"]},
     "time": {"type": "string", "format": "date-time"},
     "datacontenttype": {"const": "application/json"},
-    "dataschema": {"const": "https://cuajone.example/contracts/v2/event.schema.json"},
+    "dataschema": {"const": "https://nexoai.example/contracts/v2/event.schema.json"},
     "subject": {"type": "string", "pattern": "^track/[1-9][0-9]*$"},
     "contractversion": {"const": "2.0.0"},
     "data": {

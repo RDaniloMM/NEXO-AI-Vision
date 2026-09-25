@@ -4,7 +4,7 @@
 
 #include <cwctype>
 
-namespace cuajone::platform::detail {
+namespace nexoai::platform::detail {
 
 bool validSecretProfileName(std::wstring_view profile_name) noexcept {
     if (profile_name.empty() || profile_name.size() > 80) return false;
@@ -15,4 +15,4 @@ bool validSecretProfileName(std::wstring_view profile_name) noexcept {
     return true;
 }
 
-}  // namespace cuajone::platform::detail
+}  // namespace nexoai::platform::detail

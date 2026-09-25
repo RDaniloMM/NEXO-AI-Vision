@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/contracts.hpp"
-#include "cuajone/ppe_analytics.hpp"
+#include "nexoai/contracts.hpp"
+#include "nexoai/ppe_analytics.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -11,7 +11,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 std::string escapeJson(std::string_view value) {
@@ -139,8 +139,8 @@ std::string ppeJsonV3(const std::optional<PpeEvaluation>& value) {
 }
 
 std::string legacyEventType(std::string_view type) {
-    if (type == "com.cuajone.safety.ppe.violation.v2") return "com.cuajone.safety.ppe.violation.v1";
-    if (type == "com.cuajone.safety.fall.possible.v2") return "com.cuajone.safety.fall.possible.v1";
+    if (type == "com.nexoai.safety.ppe.violation.v2") return "com.nexoai.safety.ppe.violation.v1";
+    if (type == "com.nexoai.safety.fall.possible.v2") return "com.nexoai.safety.fall.possible.v1";
     return std::string(type);
 }
 
@@ -193,7 +193,7 @@ std::string canonicalJson(const CanonicalEvent& event) {
         + std::to_string(event.frame_id) + ",\"monotonic_timestamp_ms\":"
         + std::to_string(event.monotonic_timestamp_ms) + ",\"status\":" + quote(legacyStatus(event))
         + ",\"track_id\":" + std::to_string(event.track_id)
-        + "},\"datacontenttype\":\"application/json\",\"dataschema\":\"https://cuajone.example/contracts/v1/event.schema.json\",\"id\":"
+        + "},\"datacontenttype\":\"application/json\",\"dataschema\":\"https://nexoai.example/contracts/v1/event.schema.json\",\"id\":"
         + quote(event.id) + ",\"source\":" + quote(event.source)
         + ",\"specversion\":\"1.0\",\"subject\":" + quote(event.subject)
         + ",\"time\":" + quote(event.time) + ",\"type\":" + quote(legacyEventType(event.type)) + "}";
@@ -231,7 +231,7 @@ std::string canonicalJsonV2(const CanonicalEvent& event) {
         + std::to_string(event.frame_id) + ",\"monotonic_timestamp_ms\":"
         + std::to_string(event.monotonic_timestamp_ms) + ",\"ppe\":" + ppeJson(event.ppe)
         + ",\"status\":" + quote(event.status) + ",\"track_id\":" + std::to_string(event.track_id)
-        + "},\"datacontenttype\":\"application/json\",\"dataschema\":\"https://cuajone.example/contracts/v2/event.schema.json\",\"id\":"
+        + "},\"datacontenttype\":\"application/json\",\"dataschema\":\"https://nexoai.example/contracts/v2/event.schema.json\",\"id\":"
         + quote(event.id) + ",\"source\":" + quote(event.source)
         + ",\"specversion\":\"1.0\",\"subject\":" + quote(event.subject)
         + ",\"time\":" + quote(event.time) + ",\"type\":" + quote(event.type) + "}";
@@ -263,7 +263,7 @@ std::string canonicalJsonV2(const CanonicalFrameResult& result) {
 }
 
 std::string canonicalJsonV3(const CanonicalEvent& event) {
-    if (event.type != "com.cuajone.safety.ppe.violation.v2") {
+    if (event.type != "com.nexoai.safety.ppe.violation.v2") {
         throw std::invalid_argument("V3 PPE event serializer accepts only PPE violation events");
     }
     return "{\"contractversion\":\"3.0.0\",\"data\":{\"confidence\":"
@@ -271,10 +271,10 @@ std::string canonicalJsonV3(const CanonicalEvent& event) {
         + std::to_string(event.frame_id) + ",\"monotonic_timestamp_ms\":"
         + std::to_string(event.monotonic_timestamp_ms) + ",\"ppe\":" + ppeJsonV3(event.ppe)
         + ",\"status\":" + quote(event.status) + ",\"track_id\":" + std::to_string(event.track_id)
-        + "},\"datacontenttype\":\"application/json\",\"dataschema\":\"https://cuajone.example/contracts/v3/event.schema.json\",\"id\":"
+        + "},\"datacontenttype\":\"application/json\",\"dataschema\":\"https://nexoai.example/contracts/v3/event.schema.json\",\"id\":"
         + quote(event.id) + ",\"source\":" + quote(event.source)
         + ",\"specversion\":\"1.0\",\"subject\":" + quote(event.subject)
-        + ",\"time\":" + quote(event.time) + ",\"type\":\"com.cuajone.safety.ppe.violation.v3\"}";
+        + ",\"time\":" + quote(event.time) + ",\"type\":\"com.nexoai.safety.ppe.violation.v3\"}";
 }
 
 std::string canonicalJsonV3(const CanonicalFrameResult& result) {
@@ -282,7 +282,7 @@ std::string canonicalJsonV3(const CanonicalFrameResult& result) {
     std::string output = "{\"contract_version\":\"3.0.0\",\"events\":[";
     bool first_event = true;
     for (const auto& event : result.events) {
-        if (event.type != "com.cuajone.safety.ppe.violation.v2") continue;
+        if (event.type != "com.nexoai.safety.ppe.violation.v2") continue;
         if (!first_event) output += ',';
         output += quote(event.id);
         first_event = false;
@@ -308,4 +308,4 @@ std::string runtimeDefaultsJson() {
     return R"({"analytics":{"backend":"native","mode":"ppe-fall"},"contract_version":"1.0.0","fall":{"alert_cooldown_ms":120000,"aspect_ratio":1.05,"confirm_frames":12,"descent_ratio":0.12,"near_floor_ratio":0.65,"reset_frames":20,"torso_angle_degrees":55.0,"track_ttl_ms":5000},"ppe":{"alert_cooldown_ms":60000,"minimum_samples":12,"present_ratio":0.35,"track_ttl_ms":5000,"window":20},"thresholds":{"maximum_detections":300,"nms_iou":0.45,"pose_confidence":0.35,"ppe_confidence":0.3},"tracker":{"frame_rate":30,"high_confidence_threshold":0.35,"low_confidence_threshold":0.1,"match_threshold":0.8,"maximum_age":30,"maximum_tracks":128,"profile":"byte-track-eigen"}})";
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

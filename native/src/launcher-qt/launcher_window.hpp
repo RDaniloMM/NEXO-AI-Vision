@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "cuajone/launcher_support.hpp"
+#include "nexoai/launcher_support.hpp"
 #include "platform_paths.hpp"
 
 #include <QFile>
@@ -54,9 +54,9 @@ private:
     void setStatus(const QString& text);
     void launchRuntime(bool preflight);
 
-    cuajone::launcher::LauncherSettings readLauncherSettings() const;
-    cuajone::launcher::CameraConnectionProfile readProfile(const QString& name) const;
-    void writeProfile(const cuajone::launcher::CameraConnectionProfile& profile);
+    nexoai::launcher::LauncherSettings readLauncherSettings() const;
+    nexoai::launcher::CameraConnectionProfile readProfile(const QString& name) const;
+    void writeProfile(const nexoai::launcher::CameraConnectionProfile& profile);
     std::filesystem::path profilePath(const QString& name) const;
     std::filesystem::path runtimePath() const;
     std::filesystem::path nextLogPath() const;
@@ -80,14 +80,14 @@ private:
 
     QProcess process_;
     QFile log_file_;
-    cuajone::launcher::OperatorPreferences preferences_;
-    cuajone::launcher::ComputeMode compute_mode_{cuajone::launcher::ComputeMode::Auto};
+    nexoai::launcher::OperatorPreferences preferences_;
+    nexoai::launcher::ComputeMode compute_mode_{nexoai::launcher::ComputeMode::Auto};
     bool pose_requires_person_{true};
     bool telemetry_enabled_{};
     int telemetry_interval_seconds_{5};
     bool preflight_running_{};
     bool password_warning_shown_{};
-    cuajone::platform::PlatformPaths platform_paths_;
+    nexoai::platform::PlatformPaths platform_paths_;
     std::filesystem::path profiles_dir_;
     std::filesystem::path preferences_path_;
     std::filesystem::path launcher_settings_path_;

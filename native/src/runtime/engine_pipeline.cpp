@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/engine_pipeline.hpp"
+#include "nexoai/engine_pipeline.hpp"
 
-#include "cuajone/onnx_session.hpp"
-#include "cuajone/performance_telemetry.hpp"
-#include "cuajone/preprocess.hpp"
-#include "cuajone/yolo_decode.hpp"
+#include "nexoai/onnx_session.hpp"
+#include "nexoai/performance_telemetry.hpp"
+#include "nexoai/preprocess.hpp"
+#include "nexoai/yolo_decode.hpp"
 
-#ifdef CUAJONE_WITH_TENSORRT
-#include "cuajone/engine_reader.hpp"
-#include "cuajone/tensorrt_runtime.hpp"
+#ifdef NEXOAI_WITH_TENSORRT
+#include "nexoai/engine_reader.hpp"
+#include "nexoai/tensorrt_runtime.hpp"
 #endif
 
 #include <optional>
@@ -23,7 +23,7 @@
 #include <thread>
 #include <utility>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 void validateContiguousNames(const std::map<int, std::string>& names, const std::string& model_name) {
@@ -48,7 +48,7 @@ void validateManifestLabels(const OnnxModelManifest& manifest, const std::map<in
     }
 }
 
-#ifdef CUAJONE_WITH_TENSORRT
+#ifdef NEXOAI_WITH_TENSORRT
 void validateTask(const EngineMetadata& metadata, const std::string& expected, const std::string& engine_name) {
     if (metadata.task && normalizeLabel(*metadata.task) != expected) {
         throw std::runtime_error(engine_name + " metadata task is '" + *metadata.task
@@ -169,7 +169,7 @@ struct NativeEnginePipeline::Impl {
         shared_preprocessing = pose_session != nullptr && canSharePreprocessedInput(
             ppe_session->inputWidth(), ppe_session->inputHeight(),
             pose_session->inputWidth(), pose_session->inputHeight());
-#ifdef CUAJONE_INTERNAL_DIAGNOSTICS
+#ifdef NEXOAI_INTERNAL_DIAGNOSTICS
         shared_preprocessing = shared_preprocessing && !config.force_separate_hybrid_preprocessing;
 #endif
     }
@@ -221,7 +221,7 @@ struct NativeEnginePipeline::Impl {
     }
 
     void loadCuda() {
-#ifdef CUAJONE_WITH_TENSORRT
+#ifdef NEXOAI_WITH_TENSORRT
         summary.backend = ComputeBackend::Cuda;
         summary.provider = "TensorRT 11/CUDA";
         if (!std::filesystem::is_regular_file(config.ppe_engine)) {
@@ -293,7 +293,7 @@ struct NativeEnginePipeline::Impl {
             // when PPE finds no person; the gate cannot save inference work.
             tensorrt_gpu_overlap = config.analytics.mode == AnalyticsMode::PpeFall
                 && device.compute_major >= 8;
-#ifdef CUAJONE_INTERNAL_DIAGNOSTICS
+#ifdef NEXOAI_INTERNAL_DIAGNOSTICS
             tensorrt_gpu_overlap = tensorrt_gpu_overlap && !config.force_serial_tensorrt;
 #endif
         }
@@ -359,7 +359,7 @@ struct NativeEnginePipeline::Impl {
             // Preserve PPE/pose overlap. With the person gate enabled, pose
             // runs speculatively and only its analytics result is gated.
             hybrid_pose_executor = true;
-#ifdef CUAJONE_INTERNAL_DIAGNOSTICS
+#ifdef NEXOAI_INTERNAL_DIAGNOSTICS
             hybrid_pose_executor = hybrid_pose_executor && !config.force_serial_hybrid;
 #endif
         }
@@ -430,7 +430,7 @@ struct NativeEnginePipeline::Impl {
         std::vector<Detection> ppe_detections;
         std::vector<PoseDetection> poses;
         if (tensorrt_gpu_overlap) {
-#ifdef CUAJONE_WITH_TENSORRT
+#ifdef NEXOAI_WITH_TENSORRT
             auto& ppe_trt = static_cast<TensorRtSession&>(*ppe_session);
             auto& pose_trt = static_cast<TensorRtSession&>(*pose_session);
             PreprocessedFrame pose_input = ppe_input;
@@ -758,7 +758,7 @@ struct NativeEnginePipeline::Impl {
 
     EnginePipelineConfig config;
     EnginePipelineSummary summary;
-#ifdef CUAJONE_WITH_TENSORRT
+#ifdef NEXOAI_WITH_TENSORRT
     std::optional<EngineFile> ppe_file;
     std::optional<EngineFile> pose_file;
 #endif
@@ -810,7 +810,7 @@ const EnginePipelineSummary& NativeEnginePipeline::summary() const noexcept {
 }
 
 bool tensorRtBackendCompiled() noexcept {
-#ifdef CUAJONE_WITH_TENSORRT
+#ifdef NEXOAI_WITH_TENSORRT
     return true;
 #else
     return false;
@@ -821,4 +821,4 @@ bool onnxCudaExecutionProviderCompiled() noexcept {
     return true;
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

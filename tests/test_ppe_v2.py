@@ -10,8 +10,8 @@ import numpy as np
 from jsonschema import Draft202012Validator
 
 import ppe_reportev2
-from cuajone_qa.contracts import CONTRACT_ROOT_V2, ContractValidationError, load_json, load_schema_v2, validate_instance_v2
-from cuajone_qa.ppe import PPE_ITEMS, PPE_LABELS, validate_ppe_labels
+from nexoai_qa.contracts import CONTRACT_ROOT_V2, ContractValidationError, load_json, load_schema_v2, validate_instance_v2
+from nexoai_qa.ppe import PPE_ITEMS, PPE_LABELS, validate_ppe_labels
 
 
 @pytest.mark.parametrize("name", ("frame-result", "event"))

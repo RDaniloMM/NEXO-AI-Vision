@@ -34,9 +34,8 @@ target-compatible SDK.
 
 ## What Fase 2b does
 
-When `CUAJONE_BUILD_QT_VIEWER=ON`, `NexoAIVision` uses one Qt6 Widgets window
-for live analytics on both Windows and Linux. HighGUI remains only when the Qt
-viewer option is off, and the headless path does not construct a Qt application.
+`NexoAIVision` uses one Qt6 Widgets window for live analytics on both Windows
+and Linux. The headless path does not construct a Qt application.
 
 - keeps sequential batch-1 inference, capture/reconnect behavior, telemetry,
   evidence output, local video, RTSP, and contract 1.0.0 unchanged;
@@ -56,15 +55,13 @@ viewer option is off, and the headless path does not construct a Qt application.
 The tradeoff is that event delivery is polled at the same bounded display
 cadence as composition instead of using a Qt signal/slot worker. This is
 deliberate: it minimizes concurrency changes in the inference/evidence path.
-The Qt viewer is optional; without Qt6 the build retains the legacy HighGUI
-fallback for compatibility.
+Qt6 is required; there is no legacy HighGUI fallback.
 
 ## What Fase 2a does
 
-The optional `cuajone_qt_launcher` target (output `NexoAIVisionLauncher`) is a
-Qt6 Widgets application for Windows, DGX OS, and Ubuntu 22.04/24.04. It is enabled with
-`-DCUAJONE_BUILD_QT_LAUNCHER=ON`; missing Qt6 is reported as a status message
-unless `CUAJONE_REQUIRE_QT=ON`, in which case configuration fails clearly.
+The `nexoai_qt_launcher` target (output `NexoAIVisionLauncher`) is the Qt6
+Widgets launcher for Windows, DGX OS, and Ubuntu 22.04/24.04. Qt6 is required
+and a missing installation fails configuration clearly.
 
 - manages multi-selected camera profiles with New/Edit/Delete/Select all;
 - accepts an optional local MP4, AVI, MOV, or MKV file and an output folder;
@@ -86,16 +83,16 @@ fallback target and is not built when the Qt launcher is selected.
 
 Builds the POSIX runtime on UNIX via `native/CMakeLists.txt`:
 
-- `cuajone_runtime` (`capture`, `engine_pipeline`, `evidence`,
+- `nexoai_runtime` (`capture`, `engine_pipeline`, `evidence`,
   `model_manifest`, `onnx_session`) against the Linux ONNX Runtime 1.25.0
   package (`onnxruntime-linux-x64`, `ONNXRUNTIME_ROOT`), with build-tree
   RPATH so the CLI and tests find `libonnxruntime.so` without an install
   step;
-- the `NexoAIVision` CLI (`cuajone_native`, no Win32 icon resource, no
+- the `NexoAIVision` CLI (`nexoai_native`, no Win32 icon resource, no
   launcher);
-- runtime tests on UNIX: `cuajone_evidence_tests`,
-  `cuajone_capture_diagnostics_tests`, `cuajone_onnx_tests`
-  (plus the portable `cuajone_cpu_tests` from Fase 0).
+- runtime tests on UNIX: `nexoai_evidence_tests`,
+  `nexoai_capture_diagnostics_tests`, `nexoai_onnx_tests`
+  (plus the portable `nexoai_cpu_tests` from Fase 0).
 
 Still excluded on UNIX: the Win32 launcher UI, installer custom action
 (`msiquery.h`), Windows `dumpbin` closure copy, `delayimp`/`DELAYLOAD`, and the
@@ -137,10 +134,10 @@ CPU/CI configures remain CPU-only unless `TENSORRT_ROOT` is supplied.
 Provides a Linux build base that compiles everything already portable, with
 zero changes to ported logic. On UNIX, `native/CMakeLists.txt`:
 
-- builds the portable libraries `cuajone_compute`, `cuajone_contracts`,
-  `cuajone_byte_track_upstream`, `cuajone_byte_track_adapter`,
-  `cuajone_analytics`, `cuajone_inference`, `cuajone_core`;
-- builds and registers `cuajone_cpu_tests` (links only `cuajone_core`;
+- builds the portable libraries `nexoai_compute`, `nexoai_contracts`,
+  `nexoai_byte_track_upstream`, `nexoai_byte_track_adapter`,
+  `nexoai_analytics`, `nexoai_inference`, `nexoai_core`;
+- builds and registers `nexoai_cpu_tests` (links only `nexoai_core`;
   needs OpenCV `core`/`imgproc`, no ONNX Runtime);
 - skips the Windows-only graph with a clear `message(STATUS)`: Win32
   launcher + support lib (`<windows.h>`, `.rc`, `version.lib`), native
@@ -160,7 +157,7 @@ The Fase 0 exception for `evidence_tests`, `onnx_tests`, and
 `launcher_tests` and the `.rc` fixtures remain Win32-only; the Qt6 launcher
 is covered separately by the Fase 2a smoke build.
 
-There is no `CUAJONE_ENABLE_ONNX`-style flag in `native/CMakeLists.txt`
+There is no `NEXOAI_ENABLE_ONNX`-style flag in `native/CMakeLists.txt`
 (verified): the Fase 0 CI job simply builds the targets that compile
 without ORT.
 
@@ -197,10 +194,10 @@ two trees are used together):
 ```bash
 sudo apt-get install -y qt6-base-dev
 cmake -S native -B .tools/native/build/presets/linux-qt -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DCUAJONE_BUILD_RUNTIME=OFF \
-  -DCUAJONE_BUILD_TESTS=OFF -DCUAJONE_BUILD_LAUNCHER=OFF \
-  -DCUAJONE_BUILD_QT_LAUNCHER=ON
-cmake --build .tools/native/build/presets/linux-qt --target cuajone_qt_launcher
+  -DCMAKE_BUILD_TYPE=Release -DNEXOAI_BUILD_RUNTIME=OFF \
+  -DNEXOAI_BUILD_TESTS=OFF -DNEXOAI_BUILD_LAUNCHER=OFF \
+  -DNEXOAI_BUILD_QT_LAUNCHER=ON
+cmake --build .tools/native/build/presets/linux-qt --target nexoai_qt_launcher
 QT_QPA_PLATFORM=offscreen .tools/native/build/presets/linux-qt/NexoAIVisionLauncher --help
 ```
 
@@ -213,10 +210,10 @@ source native/activate-native.sh
 sudo apt-get install -y qt6-base-dev
 cmake -S native -B .tools/native/build/presets/linux-qt-viewer -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCUAJONE_BUILD_RUNTIME=ON -DCUAJONE_BUILD_TESTS=OFF \
-  -DCUAJONE_BUILD_LAUNCHER=OFF -DCUAJONE_BUILD_QT_VIEWER=ON \
+  -DNEXOAI_BUILD_RUNTIME=ON -DNEXOAI_BUILD_TESTS=OFF \
+  -DNEXOAI_BUILD_LAUNCHER=OFF \
   -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
-cmake --build .tools/native/build/presets/linux-qt-viewer --target cuajone_native
+cmake --build .tools/native/build/presets/linux-qt-viewer --target nexoai_native
 ```
 
 Run the installed runtime normally on Ubuntu/DGX OS with `--show` and
@@ -275,12 +272,11 @@ installer/linux/provision-deps.sh
 installer/linux/build-dist.sh \
   --build-dir .tools/native/build/linux-package \
   --output-dir .tools/native/dist \
-  --version 0.1.0 \
-  --with-qt
+  --version 0.1.0
 ```
 
-The technical wrapper enables the Qt6 launcher and viewer by default, uses
-`CUAJONE_CMAKE_BIN` when that variable points to CMake or its directory, and
+The technical wrapper requires the Qt6 launcher and viewer, uses
+`NEXOAI_CMAKE_BIN` when that variable points to CMake or its directory, and
 does not install apt packages itself. It provisions its local dependencies
 automatically and outputs:
 
@@ -289,9 +285,8 @@ automatically and outputs:
 .tools/native/dist/nexoai-vision-0.1.0-linux-x86_64.tar.gz
 ```
 
-For a direct development build without Qt, configure with
-`-DCUAJONE_BUILD_QT_LAUNCHER=OFF -DCUAJONE_BUILD_QT_VIEWER=OFF`; HighGUI is a
-development fallback, not the default distribution GUI.
+Qt6 is required for both direct development builds and packaged distributions;
+there is no HighGUI fallback.
 
 Install and run the DEB:
 
@@ -337,15 +332,14 @@ engines on the target DGX GPU and validate their manifests before use. The
 repository contains no production engine bundle, so the package remains
 functional for CLI/help/hardware-probe without one.
 
-System dependencies expected by the DEB are libc/libstdc++, Qt6 when the Qt
-launcher is present, and the OpenCV core/imgproc/imgcodecs/videoio libraries
-(plus HighGUI when the fallback is built). ONNX Runtime is installed in the
-private package `lib` directory. CUDA/TensorRT packages do not replace the
-host NVIDIA driver.
+System dependencies expected by the DEB are libc/libstdc++, Qt6, and the OpenCV
+core/imgproc/imgcodecs/videoio libraries. ONNX Runtime is installed in the
+private package `lib` directory. CUDA/TensorRT packages do not replace the host
+NVIDIA driver.
 
-Package versioning is resolved once by CMake through `CUAJONE_PACKAGE_VERSION`.
-The Linux wrapper passes the same `X.Y.Z` to `CUAJONE_FILE_VERSION` and
-`CUAJONE_PRODUCT_VERSION`; the Windows MSI wrapper continues to own the
+Package versioning is resolved once by CMake through `NEXOAI_PACKAGE_VERSION`.
+The Linux wrapper passes the same `X.Y.Z` to `NEXOAI_FILE_VERSION` and
+`NEXOAI_PRODUCT_VERSION`; the Windows MSI wrapper continues to own the
 four-component `version-state.json` revision policy. A Windows four-component
 file version is reduced to its first three components by the common package
 contract when CPack is used.

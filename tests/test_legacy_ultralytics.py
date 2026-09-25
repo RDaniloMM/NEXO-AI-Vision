@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from cuajone_qa.experimental import legacy_ultralytics as app
+from nexoai_qa.experimental import legacy_ultralytics as app
 
 
 class FakeTensor:

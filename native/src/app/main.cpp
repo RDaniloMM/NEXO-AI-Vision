@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/capture.hpp"
-#include "cuajone/cli.hpp"
-#include "cuajone/engine_pipeline.hpp"
-#include "cuajone/evidence.hpp"
-#include "cuajone/performance_telemetry.hpp"
-#include "cuajone/runtime_execution_plan.hpp"
+#include "nexoai/capture.hpp"
+#include "nexoai/cli.hpp"
+#include "nexoai/engine_pipeline.hpp"
+#include "nexoai/evidence.hpp"
+#include "nexoai/performance_telemetry.hpp"
+#include "nexoai/runtime_execution_plan.hpp"
 
-#ifdef CUAJONE_BUILD_QT_VIEWER
 #include "qt_mosaic_viewer.hpp"
-#else
-#include <opencv2/highgui.hpp>
-#endif
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -46,14 +42,14 @@
 
 namespace {
 
-using namespace cuajone;
+using namespace nexoai;
 using Clock = std::chrono::steady_clock;
 
 std::atomic_bool stop_requested{};
 constexpr char kLiveAnalyticsWindowTitle[] = "NexoAI Vision - Live Analytics";
 
 #ifdef _WIN32
-constexpr wchar_t kCudaWarmupChildEnvironment[] = L"CUAJONE_INTERNAL_CUDA_WARMUP_CHILD";
+constexpr wchar_t kCudaWarmupChildEnvironment[] = L"NEXOAI_INTERNAL_CUDA_WARMUP_CHILD";
 
 class UniqueHandle {
 public:
@@ -172,31 +168,6 @@ void requestStop(int) {
     stop_requested.store(true, std::memory_order_relaxed);
 }
 
-#ifdef _WIN32
-void applyLiveAnalyticsWindowIcon(std::string_view window_title) {
-    const HICON icon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(101));
-    if (icon == nullptr) return;
-    const int length = MultiByteToWideChar(
-        CP_UTF8, MB_ERR_INVALID_CHARS, window_title.data(), static_cast<int>(window_title.size()), nullptr, 0);
-    if (length <= 0) return;
-    std::wstring title(static_cast<std::size_t>(length), L'\0');
-    if (MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, window_title.data(), static_cast<int>(window_title.size()),
-            title.data(), length) <= 0) {
-        return;
-    }
-    HWND window = nullptr;
-    while ((window = FindWindowExW(nullptr, window, nullptr, title.c_str())) != nullptr) {
-        DWORD process_id{};
-        GetWindowThreadProcessId(window, &process_id);
-        if (process_id != GetCurrentProcessId()) continue;
-        SendMessageW(window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon));
-        SendMessageW(window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
-        return;
-    }
-}
-#endif
-
 void validateSourceWithoutOpening(const std::string& source) {
     const bool network = isRtspSource(source);
     if (network) {
@@ -249,7 +220,7 @@ EnginePipelineConfig enginePipelineConfig(
         },
         telemetry,
     };
-#ifdef CUAJONE_INTERNAL_DIAGNOSTICS
+#ifdef NEXOAI_INTERNAL_DIAGNOSTICS
     // This is deliberately unavailable in production binaries and only applies to offline benchmarks.
     // _dupenv_s is MSVC-only; POSIX uses getenv (borrowed pointer, no free).
 #ifdef _WIN32
@@ -257,11 +228,11 @@ EnginePipelineConfig enginePipelineConfig(
     std::size_t serial_hybrid_benchmark_length{};
     if (_dupenv_s(
             &serial_hybrid_benchmark, &serial_hybrid_benchmark_length,
-            "CUAJONE_INTERNAL_SERIAL_HYBRID_BENCHMARK") != 0) {
+            "NEXOAI_INTERNAL_SERIAL_HYBRID_BENCHMARK") != 0) {
         throw std::runtime_error("Could not read the internal serial hybrid benchmark switch");
     }
 #else
-    char* serial_hybrid_benchmark = std::getenv("CUAJONE_INTERNAL_SERIAL_HYBRID_BENCHMARK");
+    char* serial_hybrid_benchmark = std::getenv("NEXOAI_INTERNAL_SERIAL_HYBRID_BENCHMARK");
 #endif
     pipeline_config.force_serial_hybrid = !config.benchmark_image.empty()
         && serial_hybrid_benchmark != nullptr && std::string_view(serial_hybrid_benchmark) == "1";
@@ -271,12 +242,12 @@ EnginePipelineConfig enginePipelineConfig(
     std::size_t separate_hybrid_preprocessing_length{};
     if (_dupenv_s(
             &separate_hybrid_preprocessing, &separate_hybrid_preprocessing_length,
-            "CUAJONE_INTERNAL_SEPARATE_HYBRID_PREPROCESSING") != 0) {
+            "NEXOAI_INTERNAL_SEPARATE_HYBRID_PREPROCESSING") != 0) {
         throw std::runtime_error("Could not read the internal separate hybrid preprocessing switch");
     }
 #else
     char* separate_hybrid_preprocessing =
-        std::getenv("CUAJONE_INTERNAL_SEPARATE_HYBRID_PREPROCESSING");
+        std::getenv("NEXOAI_INTERNAL_SEPARATE_HYBRID_PREPROCESSING");
 #endif
     pipeline_config.force_separate_hybrid_preprocessing = !config.benchmark_image.empty()
         && separate_hybrid_preprocessing != nullptr && std::string_view(separate_hybrid_preprocessing) == "1";
@@ -286,12 +257,12 @@ EnginePipelineConfig enginePipelineConfig(
     std::size_t serial_tensorrt_benchmark_length{};
     if (_dupenv_s(
             &serial_tensorrt_benchmark, &serial_tensorrt_benchmark_length,
-            "CUAJONE_INTERNAL_SERIAL_TENSORRT_BENCHMARK") != 0) {
+            "NEXOAI_INTERNAL_SERIAL_TENSORRT_BENCHMARK") != 0) {
         throw std::runtime_error("Could not read the internal serial TensorRT benchmark switch");
     }
 #else
     char* serial_tensorrt_benchmark =
-        std::getenv("CUAJONE_INTERNAL_SERIAL_TENSORRT_BENCHMARK");
+        std::getenv("NEXOAI_INTERNAL_SERIAL_TENSORRT_BENCHMARK");
 #endif
     pipeline_config.force_serial_tensorrt = !config.benchmark_image.empty()
         && serial_tensorrt_benchmark != nullptr && std::string_view(serial_tensorrt_benchmark) == "1";
@@ -517,45 +488,8 @@ void drawAssociatedItem(cv::Mat& frame, const std::optional<Detection>& item, co
     }
 }
 
-[[maybe_unused]] void drawReconnectBanner(cv::Mat& frame) {
-    if (frame.empty()) return;
-    constexpr int kHeight = 58;
-    const int top = std::max(0, frame.rows - kHeight);
-    const cv::Rect banner(0, top, frame.cols, frame.rows - top);
-    cv::Mat pixels = frame(banner);
-    cv::Mat background(pixels.size(), pixels.type(), cv::Scalar(10, 10, 45));
-    cv::addWeighted(background, 0.78, pixels, 0.22, 0.0, pixels);
-    cv::putText(frame, "Reconectando a la camara...", cv::Point(16, top + 25),
-        cv::FONT_HERSHEY_SIMPLEX, 0.62, cv::Scalar(245, 245, 255), 2, cv::LINE_AA);
-    cv::putText(frame, "La ventana sigue activa; presiona Esc o Q para detener.", cv::Point(16, top + 48),
-        cv::FONT_HERSHEY_SIMPLEX, 0.44, cv::Scalar(210, 210, 230), 1, cv::LINE_AA);
-}
-
-#ifdef CUAJONE_BUILD_QT_VIEWER
 using GridLayout = QtMosaicGridLayout;
 using MosaicUiState = QtMosaicUiState;
-#else
-struct GridLayout {
-    std::size_t rows{};
-    std::size_t cols{};
-};
-
-struct MosaicUiState {
-    GridLayout layout{};
-    std::vector<double> col_weights;
-    std::vector<double> row_weights;
-    std::vector<cv::Rect> tile_rects;
-    int canvas_width{};
-    int canvas_height{};
-    int hover_tile{-1};
-    Clock::time_point hover_time{Clock::time_point::min()};
-    int focused_tile{};
-    bool dragging{};
-    int drag_col{-1};
-    int drag_row{-1};
-    bool ui_dirty{};
-};
-#endif
 
 // Pure helper: balanced grid with cols=ceil(sqrt(n)), rows=ceil(n/cols).
 // 1->1x1, 2->1x2, 3-4->2x2, 5-6->2x3, ... Surplus cells stay black.
@@ -567,65 +501,9 @@ GridLayout computeGridLayout(std::size_t source_count) {
     return {rows, cols};
 }
 
-// Fits a frame into a fixed-size cell preserving aspect ratio (resize +
-// centered black letterbox). Empty input yields a black cell so one failed
-// decode never blanks the grid.
-[[maybe_unused]] cv::Mat fitFrameToCell(const cv::Mat& frame, int cell_width, int cell_height) {
-    if (frame.empty() || cell_width <= 0 || cell_height <= 0) {
-        return cv::Mat(std::max(cell_height, 1), std::max(cell_width, 1), CV_8UC3,
-            cv::Scalar(0, 0, 0));
-    }
-    const double scale = std::min(
-        static_cast<double>(cell_width) / static_cast<double>(frame.cols),
-        static_cast<double>(cell_height) / static_cast<double>(frame.rows));
-    const int scaled_width = std::max(1, static_cast<int>(std::round(frame.cols * scale)));
-    const int scaled_height = std::max(1, static_cast<int>(std::round(frame.rows * scale)));
-    cv::Mat scaled;
-    cv::resize(frame, scaled, cv::Size(scaled_width, scaled_height), 0.0, 0.0, cv::INTER_LINEAR);
-    const int top = (cell_height - scaled_height) / 2;
-    const int bottom = cell_height - scaled_height - top;
-    const int left = (cell_width - scaled_width) / 2;
-    const int right = cell_width - scaled_width - left;
-    cv::Mat cell;
-    cv::copyMakeBorder(scaled, cell, top, bottom, left, right, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
-    return cell;
-}
-
-// Composes equally-sized tiles (row-major) into a single canvas; missing
-// cells are black.
-[[maybe_unused]] cv::Mat composeGridCanvas(
-    const std::vector<cv::Mat>& tiles, const GridLayout& layout, int cell_width, int cell_height) {
-    std::vector<cv::Mat> rows;
-    rows.reserve(layout.rows);
-    std::size_t index = 0;
-    const cv::Mat black_cell(cell_height, cell_width, CV_8UC3, cv::Scalar(0, 0, 0));
-    for (std::size_t row = 0; row < layout.rows; ++row) {
-        std::vector<cv::Mat> row_cells;
-        row_cells.reserve(layout.cols);
-        for (std::size_t col = 0; col < layout.cols; ++col) {
-            row_cells.push_back(index < tiles.size() ? tiles[index] : black_cell);
-            ++index;
-        }
-        cv::Mat row_image;
-        cv::hconcat(row_cells, row_image);
-        rows.push_back(std::move(row_image));
-    }
-    cv::Mat canvas;
-    cv::vconcat(rows, canvas);
-    return canvas;
-}
-
-// Single-window resizable mosaic.
-// Gesture (documented on the canvas help strip as well):
-// - Hover a tile to reveal its camera name (auto-hides after 2 s without mouse).
-// - Drag a divider border between tiles to resize: the two adjacent
-//   column/row weights are rebalanced from the pointer position, then the
-//   layout is recomputed. Dividers have an 8 px grab zone.
-// - Keyboard on the focused tile: '+'/'=' enlarge, '-'/'_' shrink,
-//   '['/']' move focus, '0' resets all weights to 1.0.
-constexpr int kDividerGrabPixels = 8;
+// The Qt mosaic owns pointer and keyboard interaction. The monitor retains
+// only the layout data needed to compose annotated frames.
 constexpr double kMinTileWeight = 0.20;
-constexpr double kFocusStepFactor = 1.10;
 constexpr auto kHoverLabelTimeout = std::chrono::seconds(2);
 
 void initMosaicWeights(MosaicUiState& state) {
@@ -677,97 +555,6 @@ std::vector<cv::Rect> weightedTileRects(
     }
     return rects;
 }
-
-int mosaicTileAt(const MosaicUiState& state, int x, int y) {
-    for (std::size_t index = 0; index < state.tile_rects.size(); ++index) {
-        if (state.tile_rects[index].contains(cv::Point(x, y))) return static_cast<int>(index);
-    }
-    return -1;
-}
-
-void mosaicClampWeights(MosaicUiState& state) {
-    for (double& w : state.col_weights) w = std::clamp(w, kMinTileWeight, 10.0);
-    for (double& w : state.row_weights) w = std::clamp(w, kMinTileWeight, 10.0);
-}
-
-void mosaicRebalanceColumns(MosaicUiState& state, int divider_col, int mouse_x) {
-    if (divider_col < 0 || static_cast<std::size_t>(divider_col + 1) >= state.col_weights.size()) return;
-    if (state.tile_rects.empty() || state.canvas_width <= 0) return;
-    const int left_edge = state.tile_rects[divider_col].x;
-    const int right_edge = state.tile_rects[divider_col + 1].x + state.tile_rects[divider_col + 1].width;
-    const int span = std::max(1, right_edge - left_edge);
-    // The divider spans every row, so the full two-column span is the unit.
-    double fraction = static_cast<double>(mouse_x - left_edge) / static_cast<double>(span);
-    fraction = std::clamp(fraction, 0.10, 0.90);
-    const double pair_total = state.col_weights[divider_col] + state.col_weights[divider_col + 1];
-    state.col_weights[divider_col] = std::max(kMinTileWeight, pair_total * fraction);
-    state.col_weights[divider_col + 1] = std::max(kMinTileWeight, pair_total * (1.0 - fraction));
-}
-
-void mosaicRebalanceRows(MosaicUiState& state, int divider_row, int mouse_y) {
-    if (divider_row < 0 || static_cast<std::size_t>(divider_row + 1) >= state.row_weights.size()) return;
-    if (state.tile_rects.empty() || state.canvas_height <= 0) return;
-    const std::size_t cols = state.layout.cols;
-    const int top_edge = state.tile_rects[static_cast<std::size_t>(divider_row) * cols].y;
-    const int bottom_edge =
-        state.tile_rects[static_cast<std::size_t>(divider_row + 1) * cols].y
-        + state.tile_rects[static_cast<std::size_t>(divider_row + 1) * cols].height;
-    const int span = std::max(1, bottom_edge - top_edge);
-    double fraction = static_cast<double>(mouse_y - top_edge) / static_cast<double>(span);
-    fraction = std::clamp(fraction, 0.10, 0.90);
-    const double pair_total = state.row_weights[divider_row] + state.row_weights[divider_row + 1];
-    state.row_weights[divider_row] = std::max(kMinTileWeight, pair_total * fraction);
-    state.row_weights[divider_row + 1] = std::max(kMinTileWeight, pair_total * (1.0 - fraction));
-}
-
-#if !defined(CUAJONE_BUILD_QT_VIEWER)
-void onMosaicMouse(int event, int x, int y, int flags, void* userdata) {
-    auto* state = static_cast<MosaicUiState*>(userdata);
-    if (state == nullptr || state->tile_rects.empty()) return;
-    const auto now = Clock::now();
-    if (event == cv::EVENT_MOUSEMOVE || event == cv::EVENT_LBUTTONDOWN) {
-        const int hit = mosaicTileAt(*state, x, y);
-        if (hit >= 0) {
-            state->hover_tile = hit;
-            state->hover_time = now;
-        }
-    }
-    if (event == cv::EVENT_LBUTTONDOWN) {
-        // Prefer the vertical divider when both are near (corners).
-        for (std::size_t col = 0; col + 1 < state->layout.cols; ++col) {
-            const int boundary = state->tile_rects[col].x + state->tile_rects[col].width;
-            if (std::abs(x - boundary) <= kDividerGrabPixels) {
-                state->dragging = true;
-                state->drag_col = static_cast<int>(col);
-                state->drag_row = -1;
-                return;
-            }
-        }
-        for (std::size_t row = 0; row + 1 < state->layout.rows; ++row) {
-            const int boundary =
-                state->tile_rects[row * state->layout.cols].y
-                + state->tile_rects[row * state->layout.cols].height;
-            if (std::abs(y - boundary) <= kDividerGrabPixels) {
-                state->dragging = true;
-                state->drag_row = static_cast<int>(row);
-                state->drag_col = -1;
-                return;
-            }
-        }
-        const int hit = mosaicTileAt(*state, x, y);
-        if (hit >= 0) state->focused_tile = hit;
-        state->dragging = false;
-    } else if (event == cv::EVENT_MOUSEMOVE && state->dragging
-        && (flags & cv::EVENT_FLAG_LBUTTON) != 0) {
-        if (state->drag_col >= 0) mosaicRebalanceColumns(*state, state->drag_col, x);
-        else if (state->drag_row >= 0) mosaicRebalanceRows(*state, state->drag_row, y);
-    } else if (event == cv::EVENT_LBUTTONUP) {
-        state->dragging = false;
-        state->drag_col = -1;
-        state->drag_row = -1;
-    }
-}
-#endif
 
 // Pastes the clean (unannotated) frame into the tile pixel-perfect 1:1
 // (never upscales; only downscales when the native frame does not fit the
@@ -945,68 +732,12 @@ void drawReconnectBannerOnCanvas(cv::Mat& canvas, const cv::Rect& tile) {
     }
 }
 
-#if !defined(CUAJONE_BUILD_QT_VIEWER)
-[[maybe_unused]] bool liveWindowStopRequested(std::string_view window_title) {
-    const int key = cv::waitKey(1) & 0xFF;
-    if (key == 'q' || key == 27) return true;
-    // Intentional semantic change: there is a single composed window, so
-    // closing it stops every stream (previously any of N windows stopped).
-    return cv::getWindowProperty(std::string(window_title), cv::WND_PROP_VISIBLE) < 1.0;
-}
-
-// Extended poll: keeps the single-window stop semantics and applies the
-// resizable-mosaic keys on the focused tile.
-bool pollLiveWindow(MosaicUiState& state, std::string_view window_title) {
-    const int key = cv::waitKey(1) & 0xFF;
-    if (key == 'q' || key == 27) return true;
-    if (key == '+' || key == '=') {
-        if (!state.col_weights.empty() && !state.row_weights.empty()
-            && !state.tile_rects.empty()) {
-            const std::size_t focus = static_cast<std::size_t>(
-                std::clamp(state.focused_tile, 0,
-                    static_cast<int>(state.tile_rects.size()) - 1));
-            state.col_weights[focus % state.layout.cols] *= kFocusStepFactor;
-            state.row_weights[focus / state.layout.cols] *= kFocusStepFactor;
-            mosaicClampWeights(state);
-        }
-    } else if (key == '-' || key == '_') {
-        if (!state.col_weights.empty() && !state.row_weights.empty()
-            && !state.tile_rects.empty()) {
-            const std::size_t focus = static_cast<std::size_t>(
-                std::clamp(state.focused_tile, 0,
-                    static_cast<int>(state.tile_rects.size()) - 1));
-            state.col_weights[focus % state.layout.cols] /= kFocusStepFactor;
-            state.row_weights[focus / state.layout.cols] /= kFocusStepFactor;
-            mosaicClampWeights(state);
-        }
-    } else if (key == ']') {
-        if (!state.tile_rects.empty()) {
-            state.focused_tile =
-                (state.focused_tile + 1) % static_cast<int>(state.tile_rects.size());
-        }
-    } else if (key == '[') {
-        if (!state.tile_rects.empty()) {
-            state.focused_tile =
-                (state.focused_tile - 1 + static_cast<int>(state.tile_rects.size()))
-                % static_cast<int>(state.tile_rects.size());
-        }
-    } else if (key == '0') {
-        initMosaicWeights(state);
-    }
-    return cv::getWindowProperty(std::string(window_title), cv::WND_PROP_VISIBLE) < 1.0;
-}
-#endif
-
 int monitor(
     const RuntimeConfig& config,
     NativeEnginePipeline& pipeline,
     PerformanceTelemetry* telemetry,
     int argc,
     char** argv) {
-#if !defined(CUAJONE_BUILD_QT_VIEWER)
-    static_cast<void>(argc);
-    static_cast<void>(argv);
-#endif
     std::optional<EvidenceWriter> evidence;
     std::optional<EvidenceWriterV3> evidence_v3;
     std::unique_ptr<EvidenceWriterQueue> evidence_queue;
@@ -1064,14 +795,8 @@ int monitor(
     // 1280x720 (16:9) keeps two-camera mosaics cheap; tiles never upscale
     // (pasteLetterboxed caps scale at 1.0 for pixel-perfect 1:1 video).
     constexpr int kMaxCanvasWidth = 1280;
-    // Fixed 16:9 display canvas. The Win32 HighGUI backend stretches a
-    // WINDOW_NORMAL image to the window client area, so a raw grid canvas
-    // (e.g. 1280x360 for a 1x2 mosaic) is stretched vertically ~2x when the
-    // ~16:9 window is maximized. Centering the grid on a 1280x720 canvas
-    // makes maximized display ~1:1: HighGUI borders would appear instead of
-    // deformation on backends honoring KEEPRATIO, and Win32 shows black
-    // letterbox bars baked into the frame. Grid layouts never exceed these
-    // bounds (rows <= cols, so height <= 720), so centering offsets are >= 0.
+    // Fixed 16:9 display canvas. The Qt viewer preserves the canvas aspect
+    // ratio while fitting it to the full-screen display.
     constexpr int kDisplayWidth = 1280;
     constexpr int kDisplayHeight = 720;
     const int base_cell_width = grid_layout.cols == 0
@@ -1085,13 +810,11 @@ int monitor(
     mosaic.canvas_width = canvas_width;
     mosaic.canvas_height = canvas_height;
     initMosaicWeights(mosaic);
-#ifdef CUAJONE_BUILD_QT_VIEWER
     std::unique_ptr<QtMosaicViewer> qt_viewer;
     if (config.show_window) {
         qt_viewer = std::make_unique<QtMosaicViewer>(
             argc, argv, kLiveAnalyticsWindowTitle, mosaic);
     }
-#endif
     std::vector<double> last_composed_cols;
     std::vector<double> last_composed_rows;
     bool grid_shown{};
@@ -1108,27 +831,8 @@ int monitor(
     const std::chrono::duration<double> telemetry_interval(config.telemetry_interval_seconds);
     const bool periodic_telemetry = telemetry != nullptr && telemetry_interval.count() > 0.0;
     auto next_snapshot = Clock::now() + telemetry_interval;
-    if (config.show_window) {
-#ifdef CUAJONE_BUILD_QT_VIEWER
-        // QtMosaicViewer owns the sole QApplication and is pumped from this
-        // monitor loop; QApplication::exec() is intentionally not used.
-#else
-        // Keep the window aspect: KEEPRATIO is a no-op value-wise
-        // (WINDOW_KEEPRATIO == 0) but documents intent; the Win32 HighGUI
-        // backend stretches WINDOW_NORMAL content to the client area, so the
-        // real guarantee comes from composing a fixed 16:9 display canvas
-        // below. The explicit aspect-ratio property helps backends that honor
-        // it (e.g. Qt) without affecting Win32.
-        cv::namedWindow(kLiveAnalyticsWindowTitle, cv::WINDOW_NORMAL | cv::WINDOW_KEEPRATIO);
-        cv::setWindowProperty(
-            kLiveAnalyticsWindowTitle, cv::WND_PROP_ASPECT_RATIO, cv::WINDOW_KEEPRATIO);
-        cv::resizeWindow(kLiveAnalyticsWindowTitle, kDisplayWidth, kDisplayHeight);
-#ifdef _WIN32
-        applyLiveAnalyticsWindowIcon(kLiveAnalyticsWindowTitle);
-#endif
-        cv::setMouseCallback(kLiveAnalyticsWindowTitle, onMosaicMouse, &mosaic);
-#endif
-    }
+    // QtMosaicViewer owns the sole QApplication and is pumped from this
+    // monitor loop; QApplication::exec() is intentionally not used.
 
     while (!stop_requested.load(std::memory_order_relaxed)) {
         if (periodic_telemetry && Clock::now() >= next_snapshot) {
@@ -1274,7 +978,7 @@ int monitor(
                         if (telemetry != nullptr) telemetry->evidenceAppendAttempted();
                         const auto evidence_started = telemetry == nullptr ? Clock::time_point{} : Clock::now();
                         const auto record = evidence->append(frame, source.config->label, event);
-                        if (event.type == "com.cuajone.safety.ppe.violation.v2") evidence_v3->append(event);
+                        if (event.type == "com.nexoai.safety.ppe.violation.v2") evidence_v3->append(event);
                         if (telemetry != nullptr) {
                             telemetry->addSample(PerformanceStage::EvidenceAppend, Clock::now() - evidence_started);
                             telemetry->evidenceAppendWritten();
@@ -1345,9 +1049,7 @@ int monitor(
                     rect.x += display_dx;
                     rect.y += display_dy;
                 }
-#ifdef CUAJONE_BUILD_QT_VIEWER
                 qt_viewer->setTileRects(mosaic.tile_rects);
-#endif
                 cv::Mat display(kDisplayHeight, kDisplayWidth, CV_8UC3, cv::Scalar(0, 0, 0));
                 const auto compose_time = Clock::now();
                 const auto render_started = telemetry == nullptr ? Clock::time_point{} : Clock::now();
@@ -1409,11 +1111,7 @@ int monitor(
                     {display_dx + 12, display.rows - 10}, cv::FONT_HERSHEY_SIMPLEX, 0.5,
                     cv::Scalar(220, 220, 220), 1, cv::LINE_AA);
                 if (telemetry != nullptr) telemetry->addSample(PerformanceStage::Render, Clock::now() - render_started);
-#ifdef CUAJONE_BUILD_QT_VIEWER
                 qt_viewer->setCanvas(display);
-#else
-                cv::imshow(kLiveAnalyticsWindowTitle, display);
-#endif
                 // Displayed frames are counted per compose, not per inference,
                 // so displayed_fps truthfully reports the composed output rate.
                 if (telemetry != nullptr) telemetry->displayedFrame();
@@ -1434,13 +1132,7 @@ int monitor(
             if (composed || now_for_poll - last_poll >= kMinComposeInterval) {
                 last_poll = now_for_poll;
                 polled = true;
-                if (
-#ifdef CUAJONE_BUILD_QT_VIEWER
-                    qt_viewer->processEvents()
-#else
-                    pollLiveWindow(mosaic, kLiveAnalyticsWindowTitle)
-#endif
-                ) {
+                if (qt_viewer->processEvents()) {
                     stop_requested.store(true, std::memory_order_relaxed);
                 }
             }
@@ -1450,11 +1142,7 @@ int monitor(
         }
     }
     for (auto& source : sources) source.capture->stop();
-#ifdef CUAJONE_BUILD_QT_VIEWER
     qt_viewer.reset();
-#else
-    cv::destroyAllWindows();
-#endif
     if (!evidence_queue) return 0;
     evidence_queue->drainAndStop();
     const EvidenceWriterQueueStats queue_stats = evidence_queue->stats();

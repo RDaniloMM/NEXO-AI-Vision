@@ -3,10 +3,10 @@
 # Linux port builds (Fase 1 POSIX runtime + Fase 2a/2b Qt6; DGX OS /
 # Ubuntu 24.04, GCC 13, Ninja).
 #
-# Scope: portable core libraries + cuajone_cpu_tests + the POSIX runtime
-# (cuajone_runtime, NexoAIVision CLI via the `linux-release` preset) and the
-# runtime test binaries it enables: cuajone_evidence_tests,
-# cuajone_capture_diagnostics_tests, cuajone_onnx_tests (exact target names).
+# Scope: portable core libraries + nexoai_cpu_tests + the POSIX runtime
+# (nexoai_runtime, NexoAIVision CLI via the `linux-release` preset) and the
+# runtime test binaries it enables: nexoai_evidence_tests,
+# nexoai_capture_diagnostics_tests, nexoai_onnx_tests (exact target names).
 # The Windows-only remainder (Win32 launcher, installer CA) stays skipped on
 # UNIX by native/CMakeLists.txt. TensorRT/CUDA is opt-in only in the package
 # job; the ordinary CPU jobs remain CPU-only. The Linux ONNX Runtime 1.25.0 package
@@ -40,7 +40,7 @@ jobs:
           path: |
             .tools/native/dependencies
             .tools/native/linux-onnxruntime-1.25.0
-          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-cuajone.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
+          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-nexoai.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
 
       - name: Install toolchain and OpenCV
         run: |
@@ -83,7 +83,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tools/native/dependencies
-          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-cuajone.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
+          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-nexoai.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
 
       - name: Install Qt6 and build prerequisites
         run: |
@@ -97,13 +97,13 @@ jobs:
         run: |
           cmake -S native -B .tools/native/build/presets/linux-qt \
             -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCUAJONE_BUILD_RUNTIME=OFF \
-            -DCUAJONE_BUILD_TESTS=OFF \
-            -DCUAJONE_BUILD_LAUNCHER=OFF \
-            -DCUAJONE_BUILD_QT_LAUNCHER=ON
+            -DNEXOAI_BUILD_RUNTIME=OFF \
+            -DNEXOAI_BUILD_TESTS=OFF \
+            -DNEXOAI_BUILD_LAUNCHER=OFF \
+            -DNEXOAI_BUILD_QT_LAUNCHER=ON
 
       - name: Build exact Qt6 launcher target
-        run: cmake --build .tools/native/build/presets/linux-qt --target cuajone_qt_launcher
+        run: cmake --build .tools/native/build/presets/linux-qt --target nexoai_qt_launcher
 
       - name: Qt6 launcher help smoke test
         env:
@@ -126,7 +126,7 @@ jobs:
           path: |
             .tools/native/dependencies
             .tools/native/linux-onnxruntime-1.25.0
-          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-cuajone.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
+          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-nexoai.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
 
       - name: Install Qt6 and build prerequisites
         run: |
@@ -140,14 +140,14 @@ jobs:
         run: |
           cmake -S native -B .tools/native/build/presets/linux-qt-viewer \
             -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCUAJONE_BUILD_RUNTIME=ON \
-            -DCUAJONE_BUILD_TESTS=OFF \
-            -DCUAJONE_BUILD_LAUNCHER=OFF \
-            -DCUAJONE_BUILD_QT_VIEWER=ON \
+            -DNEXOAI_BUILD_RUNTIME=ON \
+            -DNEXOAI_BUILD_TESTS=OFF \
+            -DNEXOAI_BUILD_LAUNCHER=OFF \
+            -DNEXOAI_BUILD_QT_VIEWER=ON \
             -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
 
       - name: Build exact Qt6 viewer runtime target
-        run: cmake --build .tools/native/build/presets/linux-qt-viewer --target cuajone_native
+        run: cmake --build .tools/native/build/presets/linux-qt-viewer --target nexoai_native
 
       - name: Qt6 viewer help smoke test
         env:
@@ -169,7 +169,7 @@ jobs:
           path: |
             .tools/native/dependencies
             .tools/native/linux-onnxruntime-1.25.0
-          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-cuajone.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
+          key: native-linux-deps-${{ hashFiles('native/third_party/byte-track-eigen-nexoai.patch', 'installer/linux/dependency-lock.env') }}-ort1.25.0
 
       - name: Install packaging toolchain and GUI dependencies
         run: |

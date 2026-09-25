@@ -15,7 +15,7 @@ function Assert-LauncherBuildVersion {
     $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($LauncherExecutable)
     $actual = '{0}.{1}.{2}.{3}' -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart
     if ([string]::IsNullOrWhiteSpace($info.FileVersion) -or $info.IsPrivateBuild -or $actual -cne $FileVersion) {
-        throw "Launcher version '$($info.FileVersion)' does not match -FileVersion $FileVersion. Reconfigure native with -DCUAJONE_FILE_VERSION=$FileVersion and rebuild before packaging."
+        throw "Launcher version '$($info.FileVersion)' does not match -FileVersion $FileVersion. Reconfigure native with -DNEXOAI_FILE_VERSION=$FileVersion and rebuild before packaging."
     }
     # Preserve the existing upgrade-version mapping: major.minor.revision.
     return '{0}.{1}.{2}' -f $parts[0], $parts[1], $parts[3]

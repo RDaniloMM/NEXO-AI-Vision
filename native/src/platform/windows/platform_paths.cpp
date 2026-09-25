@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-namespace cuajone::platform {
+namespace nexoai::platform {
 namespace {
 
 std::filesystem::path knownFolder(REFKNOWNFOLDERID folder) {
@@ -91,4 +91,4 @@ void atomicReplaceFile(
     }
 }
 
-}  // namespace cuajone::platform
+}  // namespace nexoai::platform

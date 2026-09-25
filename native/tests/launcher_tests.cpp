@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/launcher_support.hpp"
+#include "nexoai/launcher_support.hpp"
 #ifdef _WIN32
-#include "cuajone/launcher_version.hpp"
+#include "nexoai/launcher_version.hpp"
 #endif
 
 #include <chrono>
@@ -17,9 +17,9 @@
 
 namespace {
 
-using namespace cuajone::launcher;
-using cuajone::RtspTransport;
-using cuajone::VideoAcceleration;
+using namespace nexoai::launcher;
+using nexoai::RtspTransport;
+using nexoai::VideoAcceleration;
 
 void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
@@ -54,7 +54,7 @@ class TemporaryTree {
 public:
     TemporaryTree() {
         root_ = std::filesystem::temp_directory_path()
-            / (L"cuajone-launcher-tests-" + std::to_wstring(
+            / (L"nexoai-launcher-tests-" + std::to_wstring(
                 std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directories(root_ / L"output");
     }
@@ -132,7 +132,7 @@ void testModelMatrixAndArguments() {
     TemporaryTree tree;
     auto settings = baseSettings(tree);
     settings.compute_mode = ComputeMode::Auto;
-    settings.source_label = L"CAM_CUAJONE_01";
+    settings.source_label = L"CAM_NEXOAI_01";
     settings.runtime_options = {{L"--target-fps", L"12"}, {L"--ppe-conf", L"0.48"}};
     requireThrows([&] { buildLaunchPlan(settings, false); },
         "Auto accepted no model candidate");
@@ -151,7 +151,7 @@ void testModelMatrixAndArguments() {
             && contains(cuda_auto.arguments, L"--pose-engine")
             && contains(cuda_auto.arguments, L"--pose-person-gate")
             && contains(cuda_auto.arguments, L"--source-label")
-            && contains(cuda_auto.arguments, L"CAM_CUAJONE_01")
+            && contains(cuda_auto.arguments, L"CAM_NEXOAI_01")
             && contains(cuda_auto.arguments, L"--target-fps")
             && contains(cuda_auto.arguments, L"12")
             && !contains(cuda_auto.arguments, L"--ppe-onnx"),
@@ -458,9 +458,9 @@ void testWindowsQuoting() {
     require(quoteWindowsArgument(L"C:\\path with space\\")
             == L"\"C:\\path with space\\\\\"",
         "Trailing backslash was not doubled before the closing quote");
-    require(buildWindowsCommandLine({L"C:\\Program Files\\Cuajone\\NexoAIVision.exe",
+    require(buildWindowsCommandLine({L"C:\\Program Files\\NexoAI\\NexoAIVision.exe",
                                      L"--source", L"clip \"A\".mp4"})
-            == L"\"C:\\Program Files\\Cuajone\\NexoAIVision.exe\" --source \"clip \\\"A\\\".mp4\"",
+            == L"\"C:\\Program Files\\NexoAI\\NexoAIVision.exe\" --source \"clip \\\"A\\\".mp4\"",
         "Command line assembly is not CreateProcess-compatible");
 }
 
@@ -477,7 +477,7 @@ void testCredentialRedaction() {
 }
 
 void testSavedCameraProfileNames() {
-    require(isValidSavedCameraProfileName(L"CAM_CUAJONE_01"),
+    require(isValidSavedCameraProfileName(L"CAM_NEXOAI_01"),
         "Camera ID format was rejected");
     require(isValidSavedCameraProfileName(L"Gate 2-East"),
         "Safe saved camera profile name was rejected");
@@ -486,8 +486,8 @@ void testSavedCameraProfileNames() {
         require(!isValidSavedCameraProfileName(invalid),
             "Saved camera profile name accepted a reserved character");
     }
-    require(savedCameraCredentialTarget(L"CAM_CUAJONE_01")
-                == L"NexoAI Vision/RTSP/CAM_CUAJONE_01",
+    require(savedCameraCredentialTarget(L"CAM_NEXOAI_01")
+                == L"NexoAI Vision/RTSP/CAM_NEXOAI_01",
         "Saved camera credential target changed");
     requireThrows([] { savedCameraCredentialTarget(L"camera@host"); },
         "Saved camera credential target accepted an unsafe profile name");

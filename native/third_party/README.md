@@ -1,7 +1,7 @@
 # Native tracking dependencies
 
 The native runtime statically links ByteTrack-Eigen and Eigen behind
-`cuajone::ByteTracker`. No upstream DLL or public upstream type crosses the project
+`nexoai::ByteTracker`. No upstream DLL or public upstream type crosses the project
 adapter boundary.
 
 ## Provenance
@@ -17,10 +17,10 @@ downloads dependencies and fails closed when a verified source receipt is absent
 
 ## Project patch
 
-`byte-track-eigen-cuajone.patch` is applied only after the ByteTrack archive hash
+`byte-track-eigen-nexoai.patch` is applied only after the ByteTrack archive hash
 matches. It provides atomic process-wide IDs without constructor resets, bounded
 retained tracks, explicit reset/count operations, immediate removed-track pruning,
-a static-link export mode, and one-to-one deterministic rematching. The Cuajone
+a static-link export mode, and one-to-one deterministic rematching. The NexoAI
 adapter adds input validation and detection-aligned IDs.
 
 Eigen is compiled with `EIGEN_MPL2_ONLY`. Installer notices and the generated SPDX

@@ -1,11 +1,11 @@
 {
   "specversion": "1.0",
   "id": "evt-SYNTHETIC_QA_01-7-1-0",
-  "source": "urn:cuajone:camera:SYNTHETIC_QA_01",
-  "type": "com.cuajone.safety.ppe.violation.v1",
+  "source": "urn:nexoai:camera:SYNTHETIC_QA_01",
+  "type": "com.nexoai.safety.ppe.violation.v1",
   "time": "2026-01-01T00:00:00.700Z",
   "datacontenttype": "application/json",
-  "dataschema": "https://cuajone.example/contracts/v1/event.schema.json",
+  "dataschema": "https://nexoai.example/contracts/v1/event.schema.json",
   "subject": "track/1",
   "contractversion": "1.0.0",
   "data": {

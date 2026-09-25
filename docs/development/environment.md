@@ -1,7 +1,7 @@
 # Entorno local de desarrollo y QA
 
 La configuración de este documento corresponde al facade local
-`ppe_reportev2.py` con `cuajone_native.pyd` y modelos ONNX fijos. No configura el
+`ppe_reportev2.py` con `nexoai_native.pyd` y modelos ONNX fijos. No configura el
 producto Windows instalado. En producción usa el MSI aprobado, abre **NexoAI
 Vision** y guarda las cámaras mediante Windows Credential Manager.
 
@@ -23,11 +23,11 @@ uv sync --locked --extra experimental
 ```
 
 PyTorch y Ultralytics pertenecen exclusivamente a ese extra y a las pruebas de
-`cuajone_qa.experimental`. No son dependencias del harness nativo ni del MSI.
+`nexoai_qa.experimental`. No son dependencias del harness nativo ni del MSI.
 
 ## Compilar el binding local
 
-`cuajone_native.pyd` es solo desarrollo/QA. Debe permanecer bajo
+`nexoai_native.pyd` es solo desarrollo/QA. Debe permanecer bajo
 `.tools\native\build\presets\python-bindings\python` y nunca entrar en staging o
 en el MSI.
 
@@ -38,8 +38,8 @@ py -3.12 -m venv .tools\native\venvs\coupling-py312
 
 Push-Location native
 . .\activate-native.ps1
-$env:CUAJONE_PYTHON_EXECUTABLE = (Resolve-Path "..\.tools\native\venvs\coupling-py312\Scripts\python.exe").Path
-$env:CUAJONE_PYBIND11_ROOT = (Resolve-Path "..\.tools\native\venvs\coupling-py312\Lib\site-packages\pybind11\share\cmake\pybind11").Path
+$env:NEXOAI_PYTHON_EXECUTABLE = (Resolve-Path "..\.tools\native\venvs\coupling-py312\Scripts\python.exe").Path
+$env:NEXOAI_PYBIND11_ROOT = (Resolve-Path "..\.tools\native\venvs\coupling-py312\Lib\site-packages\pybind11\share\cmake\pybind11").Path
 cmake --preset python-bindings
 cmake --build --preset python-bindings-release
 ctest --preset python-bindings-release
@@ -47,12 +47,12 @@ Pop-Location
 ```
 
 `ppe_reportev2.py` descubre automáticamente el binding y las DLL en estas rutas
-locales. Para importar `cuajone_native` directamente desde otro proceso, registra
+locales. Para importar `nexoai_native` directamente desde otro proceso, registra
 las DLL y el directorio de salida:
 
 ```powershell
 $buildPython = (Resolve-Path ".tools\native\build\presets\python-bindings\python").Path
-$env:CUAJONE_NATIVE_DLL_DIRS = @(
+$env:NEXOAI_NATIVE_DLL_DIRS = @(
     $buildPython,
     (Resolve-Path ".tools\native\onnxruntime-win-x64-1.25.0\lib").Path,
     (Resolve-Path ".tools\native\opencv\opencv\build\x64\vc16\bin").Path,
@@ -61,7 +61,7 @@ $env:CUAJONE_NATIVE_DLL_DIRS = @(
 ) -join [IO.Path]::PathSeparator
 $env:PYTHONPATH = "$buildPython$([IO.Path]::PathSeparator)$PWD"
 
-.tools\native\venvs\coupling-py312\Scripts\python.exe -c "import os; handles=[os.add_dll_directory(path) for path in os.environ['CUAJONE_NATIVE_DLL_DIRS'].split(os.pathsep) if path]; import cuajone_native; print(cuajone_native.CONTRACT_VERSION)"
+.tools\native\venvs\coupling-py312\Scripts\python.exe -c "import os; handles=[os.add_dll_directory(path) for path in os.environ['NEXOAI_NATIVE_DLL_DIRS'].split(os.pathsep) if path]; import nexoai_native; print(nexoai_native.CONTRACT_VERSION)"
 ```
 
 ## Archivo `.env`
@@ -71,7 +71,7 @@ Reinicia el proceso después de cambiarlo. La plantilla no contiene usuario ni
 contraseña RTSP.
 
 ```dotenv
-CAMERA_ID=CAM_CUAJONE_01
+CAMERA_ID=CAM_NEXOAI_01
 RTSP_URL=rtsp://CAMERA_HOST/axis-media/media.amp
 ANALYTICS_MODE=ppe-fall
 PPE_ONNX_PATH=models/ppe.onnx
@@ -140,7 +140,7 @@ manifest, contrato tensorial y proveedor antes de procesar frames.
 
 `ppe_reportev2.py` no consulta `PPE_MODEL_PATH`, `POSE_MODEL_PATH`, `YOLO_DEVICE`,
 `USE_FP16` ni `YOLO_TRACKER`. Esas opciones pertenecen únicamente al módulo
-`cuajone_qa.experimental.legacy_ultralytics` y se excluyen deliberadamente de
+`nexoai_qa.experimental.legacy_ultralytics` y se excluyen deliberadamente de
 `.env.example`.
 
 ## Analítica

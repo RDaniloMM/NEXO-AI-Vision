@@ -25,11 +25,11 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from cuajone_qa.backends.native import NativeBackend
-from cuajone_qa.config import QaRuntimeConfig
-from cuajone_qa.contracts import CONTRACT_VERSION, runtime_defaults, validate_instance
-from cuajone_qa.ppe import validate_ppe_labels
-from cuajone_qa.runtime import RuntimeSettings, RuntimeState, resolve_runtime_path as _resolve_runtime_path
+from nexoai_qa.backends.native import NativeBackend
+from nexoai_qa.config import QaRuntimeConfig
+from nexoai_qa.contracts import CONTRACT_VERSION, runtime_defaults, validate_instance
+from nexoai_qa.ppe import validate_ppe_labels
+from nexoai_qa.runtime import RuntimeSettings, RuntimeState, resolve_runtime_path as _resolve_runtime_path
 
 
 class RuntimePrerequisiteError(RuntimeError):
@@ -298,7 +298,7 @@ def configure_local_native_binding() -> None:
     ]
     configured = [
         value
-        for value in os.environ.get("CUAJONE_NATIVE_DLL_DIRS", "").split(os.pathsep)
+        for value in os.environ.get("NEXOAI_NATIVE_DLL_DIRS", "").split(os.pathsep)
         if value
     ]
     for candidate in candidates:
@@ -307,7 +307,7 @@ def configure_local_native_binding() -> None:
             if candidate_text not in configured:
                 configured.append(candidate_text)
     if configured:
-        os.environ["CUAJONE_NATIVE_DLL_DIRS"] = os.pathsep.join(configured)
+        os.environ["NEXOAI_NATIVE_DLL_DIRS"] = os.pathsep.join(configured)
 
 
 def load_native_backend(mode: str) -> NativeBackend:
@@ -316,7 +316,7 @@ def load_native_backend(mode: str) -> NativeBackend:
         return NativeBackend(native_runtime_config(mode), engine_config=native_engine_config(mode))
     except (ImportError, OSError, RuntimeError, ValueError) as exc:
         raise RuntimePrerequisiteError(
-            "No se pudo iniciar cuajone_native con los modelos ONNX configurados: "
+            "No se pudo iniciar nexoai_native con los modelos ONNX configurados: "
             f"{exc}"
         ) from exc
 
@@ -324,7 +324,7 @@ def load_native_backend(mode: str) -> NativeBackend:
 def run_native_preflight(mode: str) -> int:
     """Validate static ONNX inputs and the compiled binding without opening RTSP."""
     errors: list[str] = []
-    print("Modo de ejecución: cuajone_native (.pyd)")
+    print("Modo de ejecución: nexoai_native (.pyd)")
     print(f"Modo de analítica: {mode}")
     for name, path in (("EPP ONNX", PPE_ONNX_PATH), ("pose ONNX", POSE_ONNX_PATH)):
         if name == "pose ONNX" and mode != DEFAULT_ANALYTICS_MODE:
@@ -342,10 +342,10 @@ def run_native_preflight(mode: str) -> int:
         validate_ppe_manifest(PPE_ONNX_PATH, labels)
         print("Contrato de etiquetas EPP v2: OK")
         load_native_backend(mode)
-        print("Binding cuajone_native: OK")
+        print("Binding nexoai_native: OK")
     except (ImportError, OSError, RuntimeError, ValueError) as exc:
-        errors.append(f"Binding cuajone_native no disponible: {exc}")
-        print("Binding cuajone_native: FALTA")
+        errors.append(f"Binding nexoai_native no disponible: {exc}")
+        print("Binding nexoai_native: FALTA")
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
@@ -838,7 +838,7 @@ def native_event_details(event: dict[str, Any]) -> dict[str, Any]:
         "track_id": int(data["track_id"]),
         "type": (
             "INCUMPLIMIENTO_EPP"
-            if event["type"] == "com.cuajone.safety.ppe.violation.v2"
+            if event["type"] == "com.nexoai.safety.ppe.violation.v2"
             else "POSIBLE_CAIDA"
         ),
         "epp_status": "En evaluación" if status in {"Evaluating PPE", "Evaluando EPP"} else status,
@@ -940,7 +940,7 @@ def _run_monitoring(argv: Sequence[str] | None = None) -> int:
     loaded_models = "PPE ONNX" if mode == "ppe-only" else "PPE ONNX, pose ONNX"
     print(f"Modo efectivo: {mode} | Modelos cargados: {loaded_models}")
     print(
-        "Backend: cuajone_native + ONNX Runtime CPU | "
+        "Backend: nexoai_native + ONNX Runtime CPU | "
         f"FPS objetivo: {TARGET_INFERENCE_FPS or 'sin límite'}"
     )
     print(f"EPP ONNX fijo: {PPE_ONNX_PATH}")

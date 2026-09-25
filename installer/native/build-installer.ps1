@@ -11,7 +11,7 @@
 # Version="$Major.$Minor.$Build-internal.$Revision", keeping MsiVersion strictly
 # increasing for MajorUpgrade. Explicit -Version/-FileVersion always win and
 # skip the auto-bump. The resolved FileVersion must already be stamped in the
-# launcher PE (cmake -DCUAJONE_FILE_VERSION=<FileVersion>); use
+# launcher PE (cmake -DNEXOAI_FILE_VERSION=<FileVersion>); use
 # -AutoRebuildLauncher to reconfigure/rebuild it automatically, otherwise the
 # script fails fast with the exact rebuild command. UpgradeCode never changes.
 
@@ -55,28 +55,78 @@ param(
     [string]$OutputDir,
     [string]$SupersededOutputDir,
     [string]$VerificationRoot,
-    [string]$SourceRevision = $env:CUAJONE_SOURCE_REVISION,
-    [string]$SourceArchiveUrl = $env:CUAJONE_SOURCE_ARCHIVE_URL,
-    [string]$SourceArchiveSha256 = $env:CUAJONE_SOURCE_ARCHIVE_SHA256,
-    [string]$FfmpegSourceArchiveUrl = $env:CUAJONE_FFMPEG_SOURCE_ARCHIVE_URL,
-    [string]$FfmpegSourceArchiveSha256 = $env:CUAJONE_FFMPEG_SOURCE_ARCHIVE_SHA256,
-    [string]$PythonExecutable = $env:CUAJONE_PYTHON_EXECUTABLE,
-    [string]$PpeModelPath = $env:CUAJONE_PPE_MODEL_PATH,
-    [string]$PoseModelPath = $env:CUAJONE_POSE_MODEL_PATH,
-    [string]$PpeEnginePath = $env:CUAJONE_PPE_ENGINE_PATH,
-    [string]$PoseEnginePath = $env:CUAJONE_POSE_ENGINE_PATH,
+    [string]$SourceRevision = $env:NEXOAI_SOURCE_REVISION,
+    [string]$SourceArchiveUrl = $env:NEXOAI_SOURCE_ARCHIVE_URL,
+    [string]$SourceArchiveSha256 = $env:NEXOAI_SOURCE_ARCHIVE_SHA256,
+    [string]$FfmpegSourceArchiveUrl = $env:NEXOAI_FFMPEG_SOURCE_ARCHIVE_URL,
+    [string]$FfmpegSourceArchiveSha256 = $env:NEXOAI_FFMPEG_SOURCE_ARCHIVE_SHA256,
+    [string]$PythonExecutable = $env:NEXOAI_PYTHON_EXECUTABLE,
+    [string]$PpeModelPath = $env:NEXOAI_PPE_MODEL_PATH,
+    [string]$PoseModelPath = $env:NEXOAI_POSE_MODEL_PATH,
+    [string]$PpeEnginePath = $env:NEXOAI_PPE_ENGINE_PATH,
+    [string]$PoseEnginePath = $env:NEXOAI_POSE_ENGINE_PATH,
     [string]$TensorRtSmArchitectures = "75",
     [switch]$IncludeTensorRtPtxJit,
-    [string]$PpeOnnxPath = $env:CUAJONE_PPE_ONNX_PATH,
-    [string]$PoseOnnxPath = $env:CUAJONE_POSE_ONNX_PATH,
-    [string]$OnnxRuntimeGpuRoot = $env:CUAJONE_ONNXRUNTIME_GPU_ROOT,
-    [string]$ParityReceiptPath = $env:CUAJONE_PARITY_RECEIPT,
-    [string]$SignToolPath = $env:CUAJONE_SIGNTOOL_PATH,
-    [string]$SignCommand = $env:CUAJONE_SIGN_COMMAND
+    [string]$PpeOnnxPath = $env:NEXOAI_PPE_ONNX_PATH,
+    [string]$PoseOnnxPath = $env:NEXOAI_POSE_ONNX_PATH,
+    [string]$OnnxRuntimeGpuRoot = $env:NEXOAI_ONNXRUNTIME_GPU_ROOT,
+    [string]$ParityReceiptPath = $env:NEXOAI_PARITY_RECEIPT,
+    [string]$SignToolPath = $env:NEXOAI_SIGNTOOL_PATH,
+    [string]$SignCommand = $env:NEXOAI_SIGN_COMMAND
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# Some locked-down Windows PowerShell installations omit Get-FileHash. The
+# installer verifies every staged payload, so provide the small compatible
+# implementation it needs instead of depending on a profile or optional module.
+if (-not (Get-Command -Name Get-FileHash -ErrorAction SilentlyContinue)) {
+    function Get-FileHash {
+        [CmdletBinding()]
+        param(
+            [ValidateSet("SHA1", "SHA256", "SHA384", "SHA512", "MD5")]
+            [string]$Algorithm = "SHA256",
+            [Parameter(Mandatory)]
+            [string]$LiteralPath
+        )
+
+        $path = (Resolve-Path -LiteralPath $LiteralPath -ErrorAction Stop).Path
+        $stream = [System.IO.File]::Open(
+            $path,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::Read)
+        try {
+            $hasher = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
+            try {
+                $bytes = $hasher.ComputeHash($stream)
+            } finally {
+                $hasher.Dispose()
+            }
+        } finally {
+            $stream.Dispose()
+        }
+
+        [pscustomobject]@{
+            Algorithm = $Algorithm
+            Hash = ([System.BitConverter]::ToString($bytes)).Replace("-", "")
+            Path = $path
+        }
+    }
+}
+
+# Explicitly select the module that belongs to this Windows PowerShell host.
+# Some developer environments put PowerShell 7 modules first in PSModulePath;
+# loading its Security module from Windows PowerShell causes type-data conflicts
+# and hides Get-AuthenticodeSignature used by Preview verification.
+if (-not (Get-Command -Name Get-AuthenticodeSignature -ErrorAction SilentlyContinue)) {
+    $securityModule = Join-Path $PSHOME "Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1"
+    if (-not (Test-Path -LiteralPath $securityModule -PathType Leaf)) {
+        throw "Windows PowerShell Security module was not found: $securityModule"
+    }
+    Import-Module -Name $securityModule -ErrorAction Stop
+}
 
 $scriptRoot = $PSScriptRoot
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $scriptRoot "..\..")).Path
@@ -86,15 +136,15 @@ if ([string]::IsNullOrWhiteSpace($WixToolRoot)) { $WixToolRoot = Join-Path $Tool
 $releaseDirectory = Join-Path $ToolRoot "build\presets\windows-msvc"
 if ([string]::IsNullOrWhiteSpace($ReleaseExecutable)) { $ReleaseExecutable = Join-Path $releaseDirectory "NexoAIVision.exe" }
 if ([string]::IsNullOrWhiteSpace($LauncherExecutable)) { $LauncherExecutable = Join-Path $releaseDirectory "NexoAIVisionLauncher.exe" }
-if ([string]::IsNullOrWhiteSpace($HardwareProbeCustomAction)) { $HardwareProbeCustomAction = Join-Path $releaseDirectory "CuajoneHardwareProbeCA.dll" }
+if ([string]::IsNullOrWhiteSpace($HardwareProbeCustomAction)) { $HardwareProbeCustomAction = Join-Path $releaseDirectory "NexoAIHardwareProbeCA.dll" }
 if ([string]::IsNullOrWhiteSpace($StageDir)) { $StageDir = Join-Path $ToolRoot "installer\stage" }
 if ([string]::IsNullOrWhiteSpace($WixBuildDir)) { $WixBuildDir = Join-Path $ToolRoot "installer\wix-build" }
 if ([string]::IsNullOrWhiteSpace($OutputDir)) { $OutputDir = Join-Path $ToolRoot "installer\output" }
 if ([string]::IsNullOrWhiteSpace($SupersededOutputDir)) { $SupersededOutputDir = Join-Path $ToolRoot "installer\superseded" }
 if ([string]::IsNullOrWhiteSpace($VerificationRoot)) { $VerificationRoot = Join-Path $ToolRoot "installer\msi-verification" }
 $packageSource = Join-Path $scriptRoot "Package.wxs"
-$packageProject = Join-Path $scriptRoot "CuajonePpeMonitor.wixproj"
-$iconGenerator = Join-Path $scriptRoot "generate-icon.ps1"
+$packageProject = Join-Path $scriptRoot "NexoAIVision.wixproj"
+$iconSource = Join-Path $scriptRoot "assets\icon.ico"
 $signatureVerifier = Join-Path $scriptRoot "sign-release.ps1"
 $packageVerifier = Join-Path $scriptRoot "test-installer.ps1"
 $payloadPolicy = Join-Path $scriptRoot "payload-policy.ps1"
@@ -193,13 +243,23 @@ function Invoke-PythonScript(
     # Windows PowerShell 5.1 strips embedded double quotes when forwarding `-c`
     # code to a native executable, which breaks multi-line Python snippets.
     # Running the code from a temp file behaves identically on PS 5.1 and PS 7+.
-    $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("cuajone-py-" + [Guid]::NewGuid().ToString("N") + ".py")
+    $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("nexoai-py-" + [Guid]::NewGuid().ToString("N") + ".py")
     Set-Content -LiteralPath $tempScript -Value $Code -Encoding UTF8
+    $previousErrorActionPreference = $ErrorActionPreference
     try {
-        return @(& $PythonPath $tempScript @ScriptArgs 2>&1)
+        # Python warnings arrive on stderr. Capture them as diagnostic output;
+        # callers still reject a non-zero Python exit code explicitly.
+        $ErrorActionPreference = "Continue"
+        $output = @(& $PythonPath $tempScript @ScriptArgs 2>&1)
+        $exitCode = $LASTEXITCODE
     } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
         Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
     }
+    $global:LASTEXITCODE = $exitCode
+    return @($output | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { $_ }
+    })
 }
 
 function Write-Utf8NoBom([string]$Path, [string]$Content) {
@@ -357,7 +417,7 @@ manifest = {
         "maximum_image_size": 1280,
     },
     "provenance": {
-        "source_uri": "urn:cuajone:bundled-model:" + source_filename,
+        "source_uri": "urn:nexoai:bundled-model:" + source_filename,
         "exporter": "ultralytics-onnx-export",
         "license": "NOASSERTION",
         "source_checkpoint": {
@@ -751,21 +811,32 @@ if (-not $PSBoundParameters.ContainsKey('Version') -and -not $PSBoundParameters.
     Write-Verbose ("Auto-bumped installer version to {0} ({1})" -f $Version, $FileVersion)
 }
 if ($AutoRebuildLauncher) {
-    $launcherBuildDir = Split-Path -Parent $LauncherExecutable
-    & cmake -S (Join-Path $projectRoot "native") -B $launcherBuildDir "-DCUAJONE_FILE_VERSION=$FileVersion" "-DCUAJONE_PRODUCT_VERSION=$Version"
+    # The MSI wrapper can be invoked from an ordinary PowerShell session. Load
+    # the repository-local native toolchain here so CMake can resolve Qt6 (and
+    # the matching MSVC/OpenCV/runtime dependencies) without caller setup.
+    $nativeActivator = Join-Path $projectRoot "native\activate-native.ps1"
+    Assert-File $nativeActivator "Native toolchain activator"
+    & $nativeActivator
     if ($LASTEXITCODE -ne 0) {
-        throw "Launcher reconfigure failed for -DCUAJONE_FILE_VERSION=$FileVersion"
+        throw "Could not activate the native toolchain for launcher rebuild"
     }
-    & cmake --build $launcherBuildDir --target cuajone_launcher --config Release
+    $launcherBuildDir = Split-Path -Parent $LauncherExecutable
+    & cmake -S (Join-Path $projectRoot "native") -B $launcherBuildDir "-DNEXOAI_FILE_VERSION=$FileVersion" "-DNEXOAI_PRODUCT_VERSION=$Version"
     if ($LASTEXITCODE -ne 0) {
-        throw "Launcher rebuild failed for -DCUAJONE_FILE_VERSION=$FileVersion"
+        throw "Launcher reconfigure failed for -DNEXOAI_FILE_VERSION=$FileVersion"
+    }
+    # Rebuild every binary staged by the MSI. A launcher-only rebuild can leave
+    # the renamed runtime or hardware-probe custom action missing or stale.
+    & cmake --build $launcherBuildDir --target nexoai_qt_launcher nexoai_native nexoai_installer_ca --config Release
+    if ($LASTEXITCODE -ne 0) {
+        throw "Product rebuild failed for -DNEXOAI_FILE_VERSION=$FileVersion"
     }
 } else {
     $stamped = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($LauncherExecutable)
     $stampedVersion = '{0}.{1}.{2}.{3}' -f $stamped.FileMajorPart, $stamped.FileMinorPart, $stamped.FileBuildPart, $stamped.FilePrivatePart
     if ($stampedVersion -cne $FileVersion) {
         throw ("Launcher PE version '{0}' does not match resolved -FileVersion {1}. " -f $stampedVersion, $FileVersion) +
-            ("Reconfigure native with -DCUAJONE_FILE_VERSION={0} -DCUAJONE_PRODUCT_VERSION={1} and rebuild " -f $FileVersion, $Version) +
+            ("Reconfigure native with -DNEXOAI_FILE_VERSION={0} -DNEXOAI_PRODUCT_VERSION={1} and rebuild " -f $FileVersion, $Version) +
             "before packaging, or re-run this script with -AutoRebuildLauncher."
     }
 }
@@ -779,7 +850,7 @@ if ((Split-Path -Leaf $LauncherExecutable) -cne "NexoAIVisionLauncher.exe") {
 }
 Assert-File $packageSource "WiX package source"
 Assert-File $packageProject "WiX project"
-Assert-File $iconGenerator "Icon generator"
+Assert-File $iconSource "Canonical product icon"
 Assert-File $signatureVerifier "Authenticode signing helper"
 Assert-File $packageVerifier "MSI verification helper"
 Assert-File $payloadPolicy "Installer payload policy"
@@ -795,7 +866,7 @@ if ($LASTEXITCODE -ne 0 -or $gitHead -notmatch '^[0-9a-f]{40}$') {
 $gitStatus = @(& git -C $projectRoot status --porcelain=v1 --untracked-files=all)
 $isDirty = $gitStatus.Count -gt 0
 $isSignedBuild = -not [string]::IsNullOrWhiteSpace($SignCommand)
-$isInternalPilotSigning = $env:CUAJONE_ALLOW_INTERNAL_PILOT_TRUST -ceq "1"
+$isInternalPilotSigning = $env:NEXOAI_ALLOW_INTERNAL_PILOT_TRUST -ceq "1"
 $productionParityReceipt = $null
 $cabinetCompressionLevel = Get-CabinetCompressionLevel $FastPreview
 
@@ -805,7 +876,7 @@ if ($isInternalPilotSigning -and $BuildMode -ne "Preview") {
     throw "Internal pilot signing is permitted only for Preview builds; Release requires public trust"
 }
 if ($isInternalPilotSigning -and -not $isSignedBuild) {
-    throw "Internal pilot trust was enabled without CUAJONE_SIGN_COMMAND"
+    throw "Internal pilot trust was enabled without NEXOAI_SIGN_COMMAND"
 }
 if ($BuildMode -eq "Release") {
     if (-not $isSignedBuild) {
@@ -817,7 +888,7 @@ if ($BuildMode -eq "Release") {
         throw "Release mode requires a clean worktree for exact source correspondence"
     }
     if ([string]::IsNullOrWhiteSpace($SourceRevision)) {
-        throw "Release mode requires CUAJONE_SOURCE_REVISION"
+        throw "Release mode requires NEXOAI_SOURCE_REVISION"
     }
     if ($SourceRevision -cne $gitHead) {
         throw "SourceRevision must exactly match repository HEAD $gitHead"
@@ -844,6 +915,9 @@ if ($BuildMode -eq "Release") {
 $dumpbin = Join-Path $ToolRoot "vs\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\dumpbin.exe"
 $wix = Join-Path $WixToolRoot "wix.exe"
 $openCvBin = Join-Path $ToolRoot "opencv\opencv\build\x64\vc16\bin"
+$qtRoot = Join-Path $ToolRoot "qt\6.8.3\msvc2022_64"
+$qtBin = Join-Path $qtRoot "bin"
+$qtWindowsPlatformPlugin = Join-Path $qtRoot "plugins\platforms\qwindows.dll"
 $cudaBin = Join-Path $ToolRoot "cuda-runtime\nvidia\cuda_runtime\bin"
 $cublasWheel = Join-Path $ToolRoot "downloads\nvidia_cublas_cu12-12.9.2.10-py3-none-win_amd64.whl"
 $cudnnWheel = Join-Path $ToolRoot "downloads\nvidia_cudnn_cu12-9.24.0.43-py3-none-win_amd64.whl"
@@ -865,15 +939,17 @@ if ([string]::IsNullOrWhiteSpace($OnnxRuntimeGpuRoot)) { $OnnxRuntimeGpuRoot = $
 $onnxRuntimeRoot = $OnnxRuntimeGpuRoot
 $onnxRuntimeBin = Join-Path $onnxRuntimeRoot "lib"
 $msvcCrt = Join-Path $ToolRoot "vs\VC\Redist\MSVC\14.44.35112\x64\Microsoft.VC143.CRT"
-$searchDirectories = @($openCvBin, $cudaBin, $cublasBin, $cudnnBin, $cufftBin, $tensorRtBin, $onnxRuntimeBin, $msvcCrt)
+$searchDirectories = @($qtBin, $openCvBin, $cudaBin, $cublasBin, $cudnnBin, $cufftBin, $tensorRtBin, $onnxRuntimeBin, $msvcCrt)
 
 Assert-File $dumpbin "MSVC dumpbin"
 Assert-File $wix "WiX CLI"
+Assert-Directory $qtBin "Qt6 runtime directory"
+Assert-File $qtWindowsPlatformPlugin "Qt6 Windows platform plugin"
 Assert-File (Join-Path $byteTrackRoot "LICENSE") "ByteTrack-Eigen MIT license"
-Assert-File (Join-Path $byteTrackRoot ".cuajone-source-receipt.json") "ByteTrack-Eigen source receipt"
+Assert-File (Join-Path $byteTrackRoot ".nexoai-source-receipt.json") "ByteTrack-Eigen source receipt"
 Assert-File (Join-Path $eigenRoot "COPYING.MPL2") "Eigen MPL-2.0 license"
 Assert-File (Join-Path $eigenRoot "COPYING.README") "Eigen licensing readme"
-Assert-File (Join-Path $eigenRoot ".cuajone-source-receipt.json") "Eigen source receipt"
+Assert-File (Join-Path $eigenRoot ".nexoai-source-receipt.json") "Eigen source receipt"
 Ensure-OnnxRuntimeCudaPackage $OnnxRuntimeGpuRoot
 Expand-VerifiedNvidiaWheel $cublasWheel "623f43027d40d44ceadf0043f002bd25cf353e8f13ce90b9a87057019f560661" $cublasRoot "nvidia\cublas\bin\cublasLt64_12.dll" "NVIDIA cuBLAS Windows wheel"
 Expand-VerifiedNvidiaWheel $cudnnWheel "cbd41a0ab084422c936dc9fb2fc89be5ea9a85bc421c6f23d0243bdfc945fbef" $cudnnRoot "nvidia\cudnn\bin\cudnn64_9.dll" "NVIDIA cuDNN Windows wheel"
@@ -927,30 +1003,33 @@ foreach ($extension in @("WixToolset.UI.wixext $WixVersion", "WixToolset.Util.wi
 }
 
 $nativeRoot = Join-Path $projectRoot "native"
-$cmakeLists = Join-Path $nativeRoot "CMakeLists.txt"
+$productIcon = Join-Path $scriptRoot "assets\icon.ico"
 $allCpp = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot "src") -Recurse -File -Filter "*.cpp").FullName
 $allHeaders = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot "include") -Recurse -File -Include "*.hpp", "*.h").FullName
 $platformSources = @(Get-ChildItem -LiteralPath (Join-Path $nativeRoot "src\platform") -Recurse -File -Include "*.cpp", "*.hpp").FullName
-$launcherNames = @("launcher.cpp", "launcher_support.cpp", "launcher_support.hpp", "launcher_resources.h", "launcher_version.cpp", "launcher_version.hpp")
+$launcherNames = @("launcher_support.cpp", "launcher_support.hpp", "launcher_resources.h", "launcher_version.cpp", "launcher_version.hpp", "main.cpp", "launcher_window.cpp", "launcher_window.hpp")
 $probeNames = @("compute.cpp", "installer_custom_action.cpp", "compute.hpp")
 $freshnessByBinary = @{
-    $ReleaseExecutable = @($cmakeLists) + @(
+    $ReleaseExecutable = @($productIcon) + @(
         $allCpp | Where-Object {
-            (Split-Path -Leaf $_) -notin @("launcher.cpp", "launcher_support.cpp", "installer_custom_action.cpp")
+            (Split-Path -Leaf $_) -notin @("launcher_support.cpp", "launcher_version.cpp", "installer_custom_action.cpp") -and
+            $_ -notlike "*\launcher-qt\*"
         }
     ) + @(
         $allHeaders | Where-Object {
             (Split-Path -Leaf $_) -notin @("launcher_support.hpp", "launcher_version.hpp", "launcher_resources.h")
         }
     )
-    $LauncherExecutable = @($cmakeLists,
+    $LauncherExecutable = @($productIcon,
         (Join-Path $nativeRoot "cmake\LauncherVersion.cmake"),
         (Join-Path $nativeRoot "resources\launcher_version.rc.in"),
         (Join-Path $nativeRoot "resources\launcher.rc.in")) + @(
          $allCpp + $allHeaders | Where-Object {
              (Split-Path -Leaf $_) -in $launcherNames
          }) + $platformSources
-    $HardwareProbeCustomAction = @($cmakeLists) + @(
+    # The custom-action DLL is built only from the compute/probe sources. A
+    # launcher/viewer-only CMake or icon edit must not falsely mark it stale.
+    $HardwareProbeCustomAction = @(
         $allCpp + $allHeaders | Where-Object {
             (Split-Path -Leaf $_) -in $probeNames
         }
@@ -1055,7 +1134,6 @@ $sourceRoots = [ordered]@{
 
 $generatedStageRelativePaths = if ($StageOnly) {
     @(
-        "NexoAIVision.ico"
         "build-metadata.json"
         "docs/SOURCE-OFFER.txt"
         "docs/MODEL-BUNDLE.txt"
@@ -1065,7 +1143,6 @@ $generatedStageRelativePaths = if ($StageOnly) {
     )
 } else {
     @(
-        "NexoAIVision.ico"
         "build-metadata.json"
         "docs/SOURCE-OFFER.txt"
         "docs/MODEL-BUNDLE.txt"
@@ -1195,6 +1272,12 @@ function Add-StagedEngineBuilderBinary(
 
 Add-StagedBinary $ReleaseExecutable "Application executable" "build"
 Add-StagedBinary $LauncherExecutable "Graphical launcher executable" "build"
+# Qt loads the platform integration dynamically, so it is not visible from the
+# executable import table. Stage qwindows.dll in Qt's required layout and queue
+# it to validate and collect its transitive PE imports like every other binary.
+Assert-X64Pe $qtWindowsPlatformPlugin $dumpbin
+Copy-StagedInput $qtWindowsPlatformPlugin (Join-Path $stageBin.FullName "platforms\qwindows.dll") "tool" "Qt6 Windows platform plugin"
+$queue.Enqueue($qtWindowsPlatformPlugin)
 $ffmpegPlugin = Join-Path $openCvBin "opencv_videoio_ffmpeg4120_64.dll"
 Assert-File $ffmpegPlugin "OpenCV FFmpeg videoio plugin"
 $ffmpegSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $ffmpegPlugin).Hash.ToLowerInvariant()
@@ -1628,17 +1711,8 @@ $sbom | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $stageDocs
 }
 
 $iconPath = Join-Path $StageDir "NexoAIVision.ico"
-$iconSvgPath = Join-Path $scriptRoot "assets\icon.svg"
-$iconResvgPath = Join-Path $ToolRoot "dependencies\resvg-0.47.0\resvg.exe"
-if ((Test-Path -LiteralPath $iconSvgPath -PathType Leaf) -and
-    -not (Test-Path -LiteralPath $iconResvgPath -PathType Leaf)) {
-    throw "resvg CLI is missing for the SVG application icon. Run native/Provision-Resvg.ps1 first"
-}
-& $iconGenerator -OutputPath $iconPath -SvgPath $iconSvgPath -ResvgPath $iconResvgPath
-if ($LASTEXITCODE -ne 0) {
-    throw "Icon generation failed"
-}
-Assert-File $iconPath "Generated application icon"
+Copy-StagedInput $iconSource $iconPath "repository" "Canonical product icon"
+Assert-File $iconPath "Staged canonical product icon"
 
 $metadata = [ordered]@{
     product = "NexoAI Vision"
@@ -1885,8 +1959,8 @@ Ensure-Directory $wixIntermediate
 $existingCandidates = @(Get-ChildItem -LiteralPath $OutputDir -File | Where-Object {
     $_.Name -like 'NexoAIVision-*-x64*.msi' -or
     $_.Name -like 'NexoAIVision-*-x64*.msi.sha256' -or
-    $_.Name -like 'CuajonePPEMonitor-*-x64*.msi' -or
-    $_.Name -like 'CuajonePPEMonitor-*-x64*.msi.sha256' -or
+    $_.Name -like 'NexoAIPPEMonitor-*-x64*.msi' -or
+    $_.Name -like 'NexoAIPPEMonitor-*-x64*.msi.sha256' -or
     $_.Name -like 'NexoAIVision*.cab'
 })
 if ($existingCandidates.Count -gt 0) {
@@ -1952,8 +2026,8 @@ $sidecarPath = "$installerPath.sha256"
 $activeCandidates = @(Get-ChildItem -LiteralPath $OutputDir -File | Where-Object {
     $_.Name -like 'NexoAIVision-*-x64*.msi' -or
     $_.Name -like 'NexoAIVision-*-x64*.msi.sha256' -or
-    $_.Name -like 'CuajonePPEMonitor-*-x64*.msi' -or
-    $_.Name -like 'CuajonePPEMonitor-*-x64*.msi.sha256'
+    $_.Name -like 'NexoAIPPEMonitor-*-x64*.msi' -or
+    $_.Name -like 'NexoAIPPEMonitor-*-x64*.msi.sha256'
 })
 $expectedActiveNames = @(
     (Split-Path -Leaf $installerPath)
@@ -1978,8 +2052,8 @@ if ($FastPreview) {
 }
 if ($isInternalPilotSigning) {
     $verificationParameters.AllowInternalPilotTrust = $true
-    $verificationParameters.CertificateThumbprint = $env:CUAJONE_CERTIFICATE_SHA1
-    $verificationParameters.PilotRootCertificatePath = $env:CUAJONE_PILOT_ROOT_CER
+    $verificationParameters.CertificateThumbprint = $env:NEXOAI_CERTIFICATE_SHA1
+    $verificationParameters.PilotRootCertificatePath = $env:NEXOAI_PILOT_ROOT_CER
 }
 $verification = & $packageVerifier @verificationParameters
 

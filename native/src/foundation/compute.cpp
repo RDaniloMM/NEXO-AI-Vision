@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/compute.hpp"
+#include "nexoai/compute.hpp"
 
 #include <algorithm>
 #include <iomanip>
@@ -18,7 +18,7 @@
 #include <fstream>
 #endif
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 std::string jsonEscape(std::string_view value) {
@@ -474,7 +474,7 @@ std::optional<ComputeBackend> installedComputeBackend() {
         return parseComputeBackend(utf8(value));
     };
     if (const auto current = read(L"SOFTWARE\\NexoAI Vision")) return current;
-    return read(L"SOFTWARE\\Cuajone PPE Monitor");
+    return read(L"SOFTWARE\\NexoAI PPE Monitor");
 #else
     // Linux Fase 1: NEXOAI_COMPUTE_MODE wins when set; otherwise parse the
     // ComputeMode=<auto|cuda|cpu> line of /etc/nexoai-vision/config. Absent
@@ -503,4 +503,4 @@ std::optional<ComputeBackend> installedComputeBackend() {
 #endif
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

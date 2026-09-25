@@ -7,11 +7,11 @@ from copy import deepcopy
 import numpy as np
 import pytest
 
-from cuajone_qa.backends.experimental import ExperimentalBackend
-from cuajone_qa.canonical import canonical_json, canonical_number_text, safe_source_id
-from cuajone_qa.config import QaRuntimeConfig
-from cuajone_qa.contracts import runtime_defaults
-from cuajone_qa.parity import synthetic_frames
+from nexoai_qa.backends.experimental import ExperimentalBackend
+from nexoai_qa.canonical import canonical_json, canonical_number_text, safe_source_id
+from nexoai_qa.config import QaRuntimeConfig
+from nexoai_qa.contracts import runtime_defaults
+from nexoai_qa.parity import synthetic_frames
 
 
 def fast_config() -> QaRuntimeConfig:
@@ -30,8 +30,8 @@ def test_experimental_observation_pipeline_is_deterministic() -> None:
     first_run = [backend.process_observations(frame) for frame in synthetic_frames()]
     assert len(first_run[-1].events) == 2
     assert {event["type"] for event in first_run[-1].events} == {
-        "com.cuajone.safety.ppe.violation.v1",
-        "com.cuajone.safety.fall.possible.v1",
+        "com.nexoai.safety.ppe.violation.v1",
+        "com.nexoai.safety.fall.possible.v1",
     }
     backend.reset()
     second_run = [backend.process_observations(frame) for frame in synthetic_frames()]

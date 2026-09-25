@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/runtime_execution_plan.hpp"
+#include "nexoai/runtime_execution_plan.hpp"
 
-namespace cuajone {
+namespace nexoai {
 
 ComputeBackend resolveRequestedComputeBackend(
     ComputeBackend configured_backend,
@@ -49,4 +49,4 @@ RuntimeExecutionPlan planRuntimeExecution(const RuntimeExecutionPlanningInput& i
     return {requested_backend, model_requirements, selection, fallback};
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

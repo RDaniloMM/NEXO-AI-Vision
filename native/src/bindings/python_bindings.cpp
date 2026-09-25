@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/analytics_pipeline.hpp"
-#include "cuajone/letterbox.hpp"
-#ifdef CUAJONE_PYTHON_WITH_ENGINE_RUNTIME
-#include "cuajone/engine_pipeline.hpp"
+#include "nexoai/analytics_pipeline.hpp"
+#include "nexoai/letterbox.hpp"
+#ifdef NEXOAI_PYTHON_WITH_ENGINE_RUNTIME
+#include "nexoai/engine_pipeline.hpp"
 #include <opencv2/core/mat.hpp>
 #endif
 
@@ -17,7 +17,7 @@
 #include <string>
 
 namespace py = pybind11;
-using namespace cuajone;
+using namespace nexoai;
 
 namespace {
 
@@ -69,7 +69,7 @@ std::pair<std::string, std::vector<std::string>> processObservationBundleV3(
     std::vector<std::string> events;
     events.reserve(result.canonical.events.size());
     for (const auto& event : result.canonical.events) {
-        if (event.type == "com.cuajone.safety.ppe.violation.v2") events.push_back(canonicalJsonV3(event));
+        if (event.type == "com.nexoai.safety.ppe.violation.v2") events.push_back(canonicalJsonV3(event));
     }
     return {canonicalJsonV3(result.canonical), std::move(events)};
 }
@@ -116,7 +116,7 @@ std::pair<std::string, std::vector<std::string>> processFrameBundleV2(
     return processObservationBundleV2(pipeline, observations);
 }
 
-#ifdef CUAJONE_PYTHON_WITH_ENGINE_RUNTIME
+#ifdef NEXOAI_PYTHON_WITH_ENGINE_RUNTIME
 std::pair<std::string, std::vector<std::string>> processEngineFrame(
     NativeEnginePipeline& pipeline,
     const py::array& bgr_frame,
@@ -171,8 +171,8 @@ std::pair<std::string, std::vector<std::string>> processEngineFrameV2(
 
 }  // namespace
 
-PYBIND11_MODULE(cuajone_native, module) {
-    module.doc() = "Development/QA bindings for the deterministic Cuajone C++ core";
+PYBIND11_MODULE(nexoai_native, module) {
+    module.doc() = "Development/QA bindings for the deterministic NexoAI C++ core";
     module.attr("__version__") = std::string(kRuntimeVersion);
     module.attr("CONTRACT_VERSION") = std::string(kContractVersion);
     module.attr("CONTRACT_VERSION_V2") = std::string(kContractVersionV2);
@@ -189,7 +189,7 @@ PYBIND11_MODULE(cuajone_native, module) {
         .value("HARD_HAT", PpeItem::HardHat)
         .value("EYE_PROTECTION", PpeItem::EyeProtection);
 
-#ifdef CUAJONE_PYTHON_WITH_ENGINE_RUNTIME
+#ifdef NEXOAI_PYTHON_WITH_ENGINE_RUNTIME
     py::enum_<ComputeBackend>(module, "ComputeBackend")
         .value("CUDA", ComputeBackend::Cuda)
         .value("CPU", ComputeBackend::Cpu);
@@ -296,7 +296,7 @@ PYBIND11_MODULE(cuajone_native, module) {
             return std::string(value.runtimeVersion());
         });
 
-#ifdef CUAJONE_PYTHON_WITH_ENGINE_RUNTIME
+#ifdef NEXOAI_PYTHON_WITH_ENGINE_RUNTIME
     py::class_<EnginePipelineConfig>(module, "EngineConfig")
         .def(py::init<>())
         .def_readwrite("backend", &EnginePipelineConfig::backend)

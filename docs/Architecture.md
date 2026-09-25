@@ -2,7 +2,7 @@
 
 ## Shared core
 
-`cuajone_core`, `cuajone_runtime`, analytics, inference, capture, evidence,
+`nexoai_core`, `nexoai_runtime`, analytics, inference, capture, evidence,
 model validation, and `launcher_support` contain the product rules shared by
 Windows and Linux. `launcher_support` owns profiles, preferences, validation,
 model resolution, and the launch plan; it does not create windows or processes.
@@ -13,13 +13,12 @@ model resolution, and the launch plan; it does not create windows or processes.
 platforms. It uses `QStandardPaths` for the platform path roots and `QProcess`
 for runtime supervision. The UI contract is the same on Windows and Linux:
 profiles, local video, output, validation/start/stop, logs, and the menu
-dialogs. When Qt6 is unavailable, the Windows Win32 launcher remains an
-explicit fallback target (`cuajone_launcher`), not a second product UI.
+dialogs. Qt6 is required: there is no separate Win32 launcher target or
+fallback product UI.
 
-The live mosaic follows the same rule. `qt_mosaic_viewer` is selected on both
-platforms by `CUAJONE_BUILD_QT_VIEWER`; HighGUI is retained only as the
-development/fallback path when that option is off. Headless runtime execution
-does not construct a Qt application.
+The live mosaic follows the same rule. `qt_mosaic_viewer` is the only live
+viewer on both platforms. Headless runtime execution does not construct a Qt
+application.
 
 ## Platform adapters
 

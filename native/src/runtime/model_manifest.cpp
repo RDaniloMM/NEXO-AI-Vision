@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/model_manifest.hpp"
-#include "cuajone/inference_settings.hpp"
-#include "cuajone/resource_limits.hpp"
+#include "nexoai/model_manifest.hpp"
+#include "nexoai/inference_settings.hpp"
+#include "nexoai/resource_limits.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -26,7 +26,7 @@
 #include <string_view>
 #include <variant>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 // UTF-8 byte-order mark written by Windows PowerShell 5.1 Set-Content
@@ -1003,4 +1003,4 @@ void validateOnnxModelSecurity(std::span<const std::byte> model_bytes) {
     OnnxSecurityScanner{}.scan(model_bytes);
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

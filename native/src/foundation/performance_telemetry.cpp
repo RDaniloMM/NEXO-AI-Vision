@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/performance_telemetry.hpp"
+#include "nexoai/performance_telemetry.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +13,7 @@
 #include <sstream>
 #include <vector>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 constexpr std::array<std::string_view, 13> kStageNames{
@@ -364,4 +364,4 @@ std::string performanceSourceMode(std::string_view source) {
     return "video";
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

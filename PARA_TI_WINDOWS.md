@@ -40,7 +40,7 @@ RTSP y no inicia inferencia.
 | `0.1.0-internal.25` (`FileVersion 0.1.0.25`) | Candidato local de ingeniería. No está publicado, aprobado ni autorizado para instalación. |
 | Builds desde fuente | Flujo de ingeniería futuro; requiere firma, revisión y sus propios gates. |
 
-El MSI no instala Python, PyTorch, Ultralytics, CVAT, Supervision, `cuajone_qa`, el
+El MSI no instala Python, PyTorch, Ultralytics, CVAT, Supervision, `nexoai_qa`, el
 binding `.pyd`, fixtures, engines TensorRT ni recibos de paridad. Instala como parte
 obligatoria del producto el bundle ONNX dinámico de EPP y pose. Los demás componentes
 son exclusivamente de desarrollo y QA.
@@ -133,7 +133,7 @@ msiexec.exe /i "<RUTA_MSI>" /qn /norestart `
 `INSTALLFOLDER` cambia los binarios; los datos mutables permanecen bajo
 `C:\ProgramData\NexoAI Vision`.
 
-Durante una actualización desde Cuajone PPE Monitor, conserva la carpeta heredada
+Durante una actualización desde NexoAI Vision, conserva la carpeta heredada
 sin moverla ni eliminarla. NexoAI Vision escribe datos nuevos en su propia carpeta
 y carga modelos solo desde el bundle administrado junto al runtime. El modo de cómputo se
 lee primero desde `HKLM\SOFTWARE\NexoAI Vision\ComputeMode` y, si no existe, desde

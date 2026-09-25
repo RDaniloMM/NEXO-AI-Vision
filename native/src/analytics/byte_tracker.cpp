@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/byte_tracker.hpp"
+#include "nexoai/byte_tracker.hpp"
 
 #include <BYTETracker.h>
 #include <Eigen/Dense>
@@ -12,7 +12,7 @@
 #include <tuple>
 #include <utility>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 bool validBox(const Box& box) noexcept {
@@ -116,4 +116,4 @@ void ByteTracker::reset() noexcept {
     impl_->tracker.reset();
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

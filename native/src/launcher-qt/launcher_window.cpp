@@ -53,12 +53,12 @@
 
 namespace {
 
-using cuajone::launcher::AnalyticsMode;
-using cuajone::launcher::ComputeMode;
-using cuajone::RtspTransport;
-using cuajone::VideoAcceleration;
-using cuajone::launcher::CameraConnectionProfile;
-using cuajone::launcher::LauncherSettings;
+using nexoai::launcher::AnalyticsMode;
+using nexoai::launcher::ComputeMode;
+using nexoai::RtspTransport;
+using nexoai::VideoAcceleration;
+using nexoai::launcher::CameraConnectionProfile;
+using nexoai::launcher::LauncherSettings;
 
 QString pathString(const std::filesystem::path& path) {
     return QString::fromStdWString(path.wstring());
@@ -68,7 +68,7 @@ std::filesystem::path filePath(const QString& value) {
     return std::filesystem::path(value.toStdWString());
 }
 
-cuajone::platform::PlatformPathOverrides qtPathOverrides() {
+nexoai::platform::PlatformPathOverrides qtPathOverrides() {
     return {
         filePath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)),
         filePath(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)),
@@ -85,8 +85,13 @@ std::wstring wide(const QString& value) {
 }
 
 VideoAcceleration accelerationAt(int index) {
+#ifdef _WIN32
+    return index == 1 ? VideoAcceleration::Cpu
+        : index == 2 ? VideoAcceleration::D3d11 : VideoAcceleration::Auto;
+#else
     return index == 1 ? VideoAcceleration::Cpu
         : index == 2 ? VideoAcceleration::Vaapi : VideoAcceleration::Auto;
+#endif
 }
 
 RtspTransport transportAt(int index) {
@@ -156,9 +161,21 @@ CameraConnectionProfile profileDialog(QWidget* parent, CameraConnectionProfile p
     transport->setCurrentIndex(profile.transport == RtspTransport::Tcp ? 1
         : profile.transport == RtspTransport::Udp ? 2 : 0);
     auto* acceleration = new QComboBox(&dialog);
-    acceleration->addItems({"Auto", "CPU", "VAAPI"});
+    acceleration->addItems({
+#ifdef _WIN32
+        "Auto (CPU decode)", "CPU", "D3D11 GPU"
+#else
+        "Auto", "CPU", "VAAPI"
+#endif
+    });
     acceleration->setCurrentIndex(profile.video_acceleration == VideoAcceleration::Cpu ? 1
-        : profile.video_acceleration == VideoAcceleration::Vaapi ? 2 : 0);
+        : profile.video_acceleration ==
+#ifdef _WIN32
+            VideoAcceleration::D3d11
+#else
+            VideoAcceleration::Vaapi
+#endif
+            ? 2 : 0);
     form->addRow("Profile name", name);
     form->addRow("Host / IP", host);
     form->addRow("Port", port);
@@ -167,7 +184,7 @@ CameraConnectionProfile profileDialog(QWidget* parent, CameraConnectionProfile p
     form->addRow("Password", password);
     form->addRow("Transport", transport);
     form->addRow("Acceleration", acceleration);
-    const auto secret_info = cuajone::platform::cameraPasswordStoreInfo();
+    const auto secret_info = nexoai::platform::cameraPasswordStoreInfo();
     auto* security = new QLabel(
         QString("Password storage: %1. Passwords are never written to profile files.")
             .arg(QString::fromUtf8(secret_info.description.data(),
@@ -191,7 +208,7 @@ CameraConnectionProfile profileDialog(QWidget* parent, CameraConnectionProfile p
     profile.password = wide(password->text());
     profile.transport = transportAt(transport->currentIndex());
     profile.video_acceleration = accelerationAt(acceleration->currentIndex());
-    cuajone::launcher::validateCameraConnectionProfile(profile);
+    nexoai::launcher::validateCameraConnectionProfile(profile);
     accepted = true;
     return profile;
 }
@@ -200,7 +217,7 @@ CameraConnectionProfile profileDialog(QWidget* parent, CameraConnectionProfile p
 
 LauncherWindow::LauncherWindow(QWidget* parent)
     : QMainWindow(parent),
-      platform_paths_(cuajone::platform::resolvePlatformPaths(
+      platform_paths_(nexoai::platform::resolvePlatformPaths(
           filePath(QCoreApplication::applicationDirPath()), qtPathOverrides())),
       profiles_dir_(platform_paths_.profiles_dir),
       preferences_path_(platform_paths_.config_dir / L"preferences.txt"),
@@ -209,7 +226,7 @@ LauncherWindow::LauncherWindow(QWidget* parent)
     std::error_code error;
     std::filesystem::create_directories(platform_paths_.config_dir, error);
     std::filesystem::create_directories(profiles_dir_, error);
-    preferences_ = cuajone::launcher::loadOperatorPreferences(preferences_path_);
+    preferences_ = nexoai::launcher::loadOperatorPreferences(preferences_path_);
     telemetry_enabled_ = false;
     setWindowTitle("NexoAI Vision Launcher");
     resize(860, 720);
@@ -311,9 +328,9 @@ LauncherWindow::LauncherWindow(QWidget* parent)
     loadState();
     reloadProfiles();
     const auto configuredOutput = filePath(output_->text());
-    if (output_->text().isEmpty() || !cuajone::platform::ensureWritableDirectory(configuredOutput)) {
+    if (output_->text().isEmpty() || !nexoai::platform::ensureWritableDirectory(configuredOutput)) {
         const auto defaultOutput = platform_paths_.data_dir / L"output";
-        cuajone::platform::ensureWritableDirectory(defaultOutput);
+        nexoai::platform::ensureWritableDirectory(defaultOutput);
         output_->setText(pathString(defaultOutput));
     }
     setStatus("Ready");
@@ -321,7 +338,7 @@ LauncherWindow::LauncherWindow(QWidget* parent)
 
 LauncherWindow::~LauncherWindow() {
     if (process_.state() != QProcess::NotRunning) {
-        const auto policy = cuajone::platform::processStopPolicy();
+        const auto policy = nexoai::platform::processStopPolicy();
         process_.terminate();
         if (!process_.waitForFinished(policy.graceful_timeout_ms)) process_.kill();
         process_.waitForFinished(policy.force_timeout_ms);
@@ -355,8 +372,8 @@ void LauncherWindow::loadState() {
     pose_requires_person_ = preferences_.pose_requires_person;
     telemetry_interval_seconds_ = settings.value("telemetry_interval_seconds", 5).toInt();
     selected_profiles_ = settings.value("selected_profiles").toStringList();
-    if (std::ranges::find(cuajone::launcher::kTelemetryIntervals, telemetry_interval_seconds_)
-        == cuajone::launcher::kTelemetryIntervals.end()) telemetry_interval_seconds_ = 5;
+    if (std::ranges::find(nexoai::launcher::kTelemetryIntervals, telemetry_interval_seconds_)
+        == nexoai::launcher::kTelemetryIntervals.end()) telemetry_interval_seconds_ = 5;
 }
 
 void LauncherWindow::saveState() const {
@@ -371,7 +388,7 @@ void LauncherWindow::saveState() const {
         settings.sync();
         auto preferences = preferences_;
         preferences.pose_requires_person = pose_requires_person_;
-        cuajone::launcher::saveOperatorPreferencesAtomic(preferences_path_, preferences);
+        nexoai::launcher::saveOperatorPreferencesAtomic(preferences_path_, preferences);
     } catch (...) {
         // A read-only configuration directory must not prevent the launcher
         // from closing; the next run will use safe defaults.
@@ -400,7 +417,7 @@ void LauncherWindow::reloadProfiles(const QString& preferred) {
 
 std::filesystem::path LauncherWindow::profilePath(const QString& name) const {
     const std::wstring profileName = wide(cleanText(name));
-    if (!cuajone::launcher::isValidSavedCameraProfileName(profileName)) {
+    if (!nexoai::launcher::isValidSavedCameraProfileName(profileName)) {
         throw std::invalid_argument("Profile name is invalid");
     }
     return profiles_dir_ / (profileName + L".profile");
@@ -411,31 +428,31 @@ CameraConnectionProfile LauncherWindow::readProfile(const QString& name) const {
     if (!file.open(QIODevice::ReadOnly) || file.size() > 64 * 1024) {
         throw std::runtime_error("Could not read camera profile");
     }
-    auto profile = cuajone::launcher::parseCameraConnectionProfile(
+    auto profile = nexoai::launcher::parseCameraConnectionProfile(
         file.readAll().toStdString(), wide(name));
     // Do not trust a password field from an existing file, including profiles
     // copied from another platform. Restore it only from the platform secret store.
     profile.password.clear();
-    if (const auto password = cuajone::platform::loadCameraPassword(wide(name))) {
+    if (const auto password = nexoai::platform::loadCameraPassword(wide(name))) {
         profile.password = *password;
     }
     return profile;
 }
 
 void LauncherWindow::writeProfile(const CameraConnectionProfile& profile) {
-    cuajone::launcher::validateCameraConnectionProfile(profile);
+    nexoai::launcher::validateCameraConnectionProfile(profile);
     auto diskProfile = profile;
     diskProfile.password.clear();
     QSaveFile file(pathString(profilePath(QString::fromStdWString(profile.name))));
     if (!file.open(QIODevice::WriteOnly)) throw std::runtime_error("Could not save camera profile");
-    const std::string payload = cuajone::launcher::serializeCameraConnectionProfile(diskProfile);
+    const std::string payload = nexoai::launcher::serializeCameraConnectionProfile(diskProfile);
     if (file.write(QByteArray::fromStdString(payload)) != static_cast<qint64>(payload.size())
         || !file.commit()) throw std::runtime_error("Could not atomically save camera profile");
-    if (!cuajone::platform::saveCameraPassword(profile.name, profile.password)) {
+    if (!nexoai::platform::saveCameraPassword(profile.name, profile.password)) {
         throw std::runtime_error("Could not store the camera password securely");
     }
     if (!profile.password.empty()
-        && !cuajone::platform::cameraPasswordStoreInfo().persistent
+        && !nexoai::platform::cameraPasswordStoreInfo().persistent
         && !password_warning_shown_) {
         password_warning_shown_ = true;
         QMessageBox::warning(
@@ -486,7 +503,7 @@ void LauncherWindow::editProfile() {
         if (newName != oldName) {
             std::error_code error;
             std::filesystem::remove(profilePath(oldName), error);
-            cuajone::platform::deleteCameraPassword(wide(oldName));
+            nexoai::platform::deleteCameraPassword(wide(oldName));
         }
         reloadProfiles(newName);
         setStatus("Profile updated");
@@ -506,7 +523,7 @@ void LauncherWindow::deleteProfiles() {
         for (const QString& name : selected) {
             std::error_code error;
             std::filesystem::remove(profilePath(name), error);
-            cuajone::platform::deleteCameraPassword(wide(name));
+            nexoai::platform::deleteCameraPassword(wide(name));
         }
         reloadProfiles();
         setStatus("Profiles deleted");
@@ -542,7 +559,7 @@ std::filesystem::path LauncherWindow::runtimePath() const {
 
 std::filesystem::path LauncherWindow::nextLogPath() const {
     const auto directory = platform_paths_.logs_dir;
-    cuajone::platform::ensureWritableDirectory(directory);
+    nexoai::platform::ensureWritableDirectory(directory);
     const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd-hhmmss-zzz");
     return directory / (L"nexoai-" + wide(stamp) + L".log");
 }
@@ -570,7 +587,7 @@ LauncherSettings LauncherWindow::readLauncherSettings() const {
     for (const QString& name : selected) {
         const auto profile = readProfile(name);
         settings.cameras.push_back({
-            cuajone::launcher::buildAxisRtspUrl(profile),
+            nexoai::launcher::buildAxisRtspUrl(profile),
             profile.name,
             profile.transport,
             profile.video_acceleration,
@@ -586,8 +603,11 @@ LauncherSettings LauncherWindow::readLauncherSettings() const {
 
 void LauncherWindow::launchRuntime(bool preflight) {
     if (process_.state() != QProcess::NotRunning) return;
-    const LauncherSettings settings = readLauncherSettings();
-    const auto plan = cuajone::launcher::buildLaunchPlan(settings, preflight);
+    LauncherSettings settings = readLauncherSettings();
+    // A capture started from the launcher always presents the annotated
+    // inference view. Validation remains non-visual.
+    settings.show_window = !preflight;
+    const auto plan = nexoai::launcher::buildLaunchPlan(settings, preflight);
     const auto runtime = runtimePath();
     std::error_code error;
     if (!std::filesystem::is_regular_file(runtime, error) || error) {
@@ -643,7 +663,7 @@ void LauncherWindow::startRuntime() {
 
 void LauncherWindow::stopRuntime() {
     if (process_.state() == QProcess::NotRunning) return;
-    const auto policy = cuajone::platform::processStopPolicy();
+    const auto policy = nexoai::platform::processStopPolicy();
     setStatus("Stopping runtime...");
     process_.terminate();
     if (!process_.waitForFinished(policy.graceful_timeout_ms)) {
@@ -666,14 +686,14 @@ void LauncherWindow::openPpeThresholds() {
     QDialog dialog(this);
     dialog.setWindowTitle("PPE threshold profile");
     auto* form = new QFormLayout(&dialog);
-    std::array<QDoubleSpinBox*, cuajone::kPpeOutputLabels.size()> controls{};
+    std::array<QDoubleSpinBox*, nexoai::kPpeOutputLabels.size()> controls{};
     for (std::size_t index = 0; index < controls.size(); ++index) {
         controls[index] = new QDoubleSpinBox(&dialog);
         controls[index]->setRange(0.0, 1.0);
         controls[index]->setSingleStep(0.01);
         controls[index]->setDecimals(2);
         controls[index]->setValue(preferences_.ppe_class_confidences[index]);
-        const auto label = cuajone::kPpeOutputLabels[index];
+        const auto label = nexoai::kPpeOutputLabels[index];
         form->addRow(QString::fromUtf8(label.data(), static_cast<qsizetype>(label.size())), controls[index]);
     }
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -685,7 +705,7 @@ void LauncherWindow::openPpeThresholds() {
         preferences_.ppe_class_confidences[index] = static_cast<float>(controls[index]->value());
     }
     try {
-        cuajone::launcher::saveOperatorPreferencesAtomic(preferences_path_, preferences_);
+        nexoai::launcher::saveOperatorPreferencesAtomic(preferences_path_, preferences_);
         setStatus("PPE thresholds saved");
     } catch (const std::exception& error) {
         QMessageBox::critical(this, "PPE threshold profile", readableError(error));
@@ -700,18 +720,18 @@ void LauncherWindow::openAdvancedSettings() {
     compute->addItems({"Auto", "GPU", "CPU"});
     compute->setCurrentIndex(compute_mode_ == ComputeMode::Cuda ? 1 : compute_mode_ == ComputeMode::Cpu ? 2 : 0);
     auto* imgsz = new QComboBox(&dialog);
-    for (const int value : cuajone::kAllowedImageSizes) imgsz->addItem(QString::number(value));
+    for (const int value : nexoai::kAllowedImageSizes) imgsz->addItem(QString::number(value));
     setComboText(imgsz, QString::number(preferences_.image_size));
     auto* resolution = new QComboBox(&dialog);
-    for (const auto value : cuajone::launcher::kStreamResolutions) resolution->addItem(QString::fromStdWString(std::wstring(value)));
+    for (const auto value : nexoai::launcher::kStreamResolutions) resolution->addItem(QString::fromStdWString(std::wstring(value)));
     setComboText(resolution, QString::fromStdWString(preferences_.stream_resolution));
     auto* fps = new QComboBox(&dialog);
-    for (const int value : cuajone::launcher::kStreamFrameRates) fps->addItem(QString::number(value));
+    for (const int value : nexoai::launcher::kStreamFrameRates) fps->addItem(QString::number(value));
     setComboText(fps, QString::number(preferences_.stream_fps));
     auto* telemetry = new QCheckBox("Enable performance telemetry", &dialog);
     telemetry->setChecked(telemetry_enabled_);
     auto* interval = new QComboBox(&dialog);
-    for (const int value : cuajone::launcher::kTelemetryIntervals) interval->addItem(QString::number(value) + " seconds", value);
+    for (const int value : nexoai::launcher::kTelemetryIntervals) interval->addItem(QString::number(value) + " seconds", value);
     const int intervalIndex = interval->findData(telemetry_interval_seconds_);
     if (intervalIndex >= 0) interval->setCurrentIndex(intervalIndex);
     auto* acceleration = new QComboBox(&dialog);
@@ -779,7 +799,7 @@ void LauncherWindow::importEnv() {
             const QString lower = source.toLower();
             const bool isRtsp = lower.startsWith("rtsp://") || lower.startsWith("rtsps://");
             if (isRtsp) {
-                CameraConnectionProfile profile = cuajone::launcher::parseLegacyCameraUrl(
+                CameraConnectionProfile profile = nexoai::launcher::parseLegacyCameraUrl(
                     wide(source), wide(envValue(values, "CAMERA_ID").isEmpty() ? "CAMERA_IMPORTED" : envValue(values, "CAMERA_ID")));
                 if (!transport.isEmpty()) {
                     profile.transport = preferences_.rtsp_transport;
@@ -804,10 +824,10 @@ void LauncherWindow::importEnv() {
             output_->setText(candidate.isRelative() ? candidate.absoluteFilePath() : output);
         }
         const QString imageSize = envValue(values, "PPE_IMGSZ");
-        if (!imageSize.isEmpty() && cuajone::isSupportedImageSize(imageSize.toInt())) preferences_.image_size = imageSize.toInt();
+        if (!imageSize.isEmpty() && nexoai::isSupportedImageSize(imageSize.toInt())) preferences_.image_size = imageSize.toInt();
         const QString confidence = envValue(values, "PPE_CONF");
         if (!confidence.isEmpty()) {
-            const float value = cuajone::launcher::parsePpeConfidenceThreshold(wide(confidence));
+            const float value = nexoai::launcher::parsePpeConfidenceThreshold(wide(confidence));
             preferences_.ppe_class_confidences.fill(value);
         }
         const QString posePersonGate = envValue(values, "POSE_PERSON_GATE");
@@ -831,7 +851,7 @@ void LauncherWindow::importEnv() {
 void LauncherWindow::appendProcessOutput() {
     const QByteArray output = process_.readAllStandardOutput() + process_.readAllStandardError();
     if (output.isEmpty()) return;
-    const std::string redacted = cuajone::launcher::redactRtspCredentials(
+    const std::string redacted = nexoai::launcher::redactRtspCredentials(
         std::string_view(output.constData(), static_cast<std::size_t>(output.size())));
     const QByteArray safe = QByteArray::fromStdString(redacted);
     if (log_file_.isOpen()) {

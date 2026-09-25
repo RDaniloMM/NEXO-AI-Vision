@@ -2,10 +2,10 @@
 
 #include "platform_process.hpp"
 
-namespace cuajone::platform {
+namespace nexoai::platform {
 
 ProcessStopPolicy processStopPolicy() noexcept {
     return detail::defaultProcessStopPolicy();
 }
 
-}  // namespace cuajone::platform
+}  // namespace nexoai::platform

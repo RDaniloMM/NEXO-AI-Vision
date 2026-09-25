@@ -1,6 +1,6 @@
 # Evaluación de integrabilidad con Axis ACAP
 
-**Decisión actual:** no se afirma compatibilidad ACAP para las cámaras de Cuajone
+**Decisión actual:** no se afirma compatibilidad ACAP para las cámaras de NexoAI
 sin inventario de hardware y AXIS OS. El piloto recomendado mantiene la analítica
 en Windows, consume un único perfil RTSP dedicado por cámara y envía Milestone
 Analytics Events. ACAP queda como una línea de producto separada.

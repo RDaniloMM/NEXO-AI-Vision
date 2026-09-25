@@ -75,7 +75,7 @@ confianzas se guardan por usuario en LocalAppData; las credenciales RTSP permane
 en Windows Credential Manager. La salida operativa se guarda bajo
 `C:\ProgramData\NexoAI Vision`.
 
-Al actualizar desde Cuajone PPE Monitor, NexoAI Vision usa la carpeta nueva para
+Al actualizar desde NexoAI PPE Monitor, NexoAI Vision usa la carpeta nueva para
 archivos nuevos. No elimina ni mueve la carpeta anterior, pero tampoco carga modelos
 desde la ubicación heredada.
 

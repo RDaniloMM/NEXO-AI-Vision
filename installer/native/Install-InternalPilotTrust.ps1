@@ -11,11 +11,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 $signingRoot = Join-Path $projectRoot ".tools\native\signing"
-if ([string]::IsNullOrWhiteSpace($RootCertificatePath)) { $RootCertificatePath = Join-Path $signingRoot "Cuajone-PPE-Monitor-Internal-Pilot-Root-CA-2026.cer" }
-if ([string]::IsNullOrWhiteSpace($LeafCertificatePath)) { $LeafCertificatePath = Join-Path $signingRoot "Cuajone-PPE-Monitor-Internal-Pilot-Code-Signing-2026.cer" }
+if ([string]::IsNullOrWhiteSpace($RootCertificatePath)) { $RootCertificatePath = Join-Path $signingRoot "NexoAI-PPE-Monitor-Internal-Pilot-Root-CA-2026.cer" }
+if ([string]::IsNullOrWhiteSpace($LeafCertificatePath)) { $LeafCertificatePath = Join-Path $signingRoot "NexoAI-PPE-Monitor-Internal-Pilot-Code-Signing-2026.cer" }
 
-$rootSubject = "CN=Cuajone PPE Monitor Internal Pilot Root CA 2026, O=Cuajone PPE Monitor Project"
-$leafSubject = "CN=Cuajone PPE Monitor Internal Pilot Code Signing 2026, O=Cuajone PPE Monitor Project"
+$rootSubject = "CN=NexoAI PPE Monitor Internal Pilot Root CA 2026, O=NexoAI PPE Monitor Project"
+$leafSubject = "CN=NexoAI PPE Monitor Internal Pilot Code Signing 2026, O=NexoAI PPE Monitor Project"
 $codeSigningOid = "1.3.6.1.5.5.7.3.3"
 $sha256WithRsaOid = "1.2.840.113549.1.1.11"
 

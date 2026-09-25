@@ -2,10 +2,10 @@
 
 Set-StrictMode -Version Latest
 
-$script:CuajoneParityReceiptSchema = Join-Path $PSScriptRoot "..\..\contracts\v1\parity-receipt.schema.json"
-$script:CuajoneParityMaximumAge = [TimeSpan]::FromDays(7)
-$script:CuajoneParityFutureSkew = [TimeSpan]::FromMinutes(5)
-$script:CuajoneParityStages = @(
+$script:NexoAIParityReceiptSchema = Join-Path $PSScriptRoot "..\..\contracts\v1\parity-receipt.schema.json"
+$script:NexoAIParityMaximumAge = [TimeSpan]::FromDays(7)
+$script:NexoAIParityFutureSkew = [TimeSpan]::FromMinutes(5)
+$script:NexoAIParityStages = @(
     "contracts-defaults",
     "preprocess-letterbox",
     "detections-keypoints-canonicalization",
@@ -28,12 +28,12 @@ function Assert-ProductionParityReceipt(
         throw "Production Release requires a parity receipt: $Path"
     }
     $fullPath = [System.IO.Path]::GetFullPath($Path)
-    if (-not (Test-Path -LiteralPath $script:CuajoneParityReceiptSchema -PathType Leaf)) {
-        throw "Parity receipt schema was not found: $script:CuajoneParityReceiptSchema"
+    if (-not (Test-Path -LiteralPath $script:NexoAIParityReceiptSchema -PathType Leaf)) {
+        throw "Parity receipt schema was not found: $script:NexoAIParityReceiptSchema"
     }
     try {
         $schemaValid = Test-Json -LiteralPath $fullPath `
-            -SchemaFile $script:CuajoneParityReceiptSchema -ErrorAction Stop
+            -SchemaFile $script:NexoAIParityReceiptSchema -ErrorAction Stop
     } catch {
         throw "Parity receipt does not satisfy the shared schema: $($_.Exception.Message)"
     }
@@ -65,10 +65,10 @@ function Assert-ProductionParityReceipt(
         throw "Parity receipt generated_at is not a valid timestamp"
     }
     $now = [DateTimeOffset]::UtcNow
-    if ($parsedTime -gt $now.Add($script:CuajoneParityFutureSkew)) {
+    if ($parsedTime -gt $now.Add($script:NexoAIParityFutureSkew)) {
         throw "Parity receipt generated_at is beyond the allowed five-minute future skew"
     }
-    if ($parsedTime -lt $now.Subtract($script:CuajoneParityMaximumAge)) {
+    if ($parsedTime -lt $now.Subtract($script:NexoAIParityMaximumAge)) {
         throw "Parity receipt is older than the seven-day Release validity window"
     }
 
@@ -106,8 +106,8 @@ function Assert-ProductionParityReceipt(
     }
 
     $stages = @($receipt.stages)
-    if ($stages.Count -ne $script:CuajoneParityStages.Count -or
-        (($stages.name -join '|') -cne ($script:CuajoneParityStages -join '|'))) {
+    if ($stages.Count -ne $script:NexoAIParityStages.Count -or
+        (($stages.name -join '|') -cne ($script:NexoAIParityStages -join '|'))) {
         throw "Parity receipt must contain the exact six ordered production stages"
     }
     foreach ($stage in $stages) {

@@ -14,12 +14,12 @@ $toolRoot = Join-Path $projectRoot ".tools\native"
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Path $toolRoot "signing" }
 
 $storeLocation = "Cert:\CurrentUser\My"
-$rootSubject = "CN=Cuajone PPE Monitor Internal Pilot Root CA 2026, O=Cuajone PPE Monitor Project"
-$leafSubject = "CN=Cuajone PPE Monitor Internal Pilot Code Signing 2026, O=Cuajone PPE Monitor Project"
-$rootFriendlyName = "Cuajone PPE Monitor Internal Pilot Root CA 2026"
-$leafFriendlyName = "Cuajone PPE Monitor Internal Pilot Code Signing 2026"
-$rootCerName = "Cuajone-PPE-Monitor-Internal-Pilot-Root-CA-2026.cer"
-$leafCerName = "Cuajone-PPE-Monitor-Internal-Pilot-Code-Signing-2026.cer"
+$rootSubject = "CN=NexoAI PPE Monitor Internal Pilot Root CA 2026, O=NexoAI PPE Monitor Project"
+$leafSubject = "CN=NexoAI PPE Monitor Internal Pilot Code Signing 2026, O=NexoAI PPE Monitor Project"
+$rootFriendlyName = "NexoAI PPE Monitor Internal Pilot Root CA 2026"
+$leafFriendlyName = "NexoAI PPE Monitor Internal Pilot Code Signing 2026"
+$rootCerName = "NexoAI-PPE-Monitor-Internal-Pilot-Root-CA-2026.cer"
+$leafCerName = "NexoAI-PPE-Monitor-Internal-Pilot-Code-Signing-2026.cer"
 $codeSigningOid = "1.3.6.1.5.5.7.3.3"
 $sha256WithRsaOid = "1.2.840.113549.1.1.11"
 
@@ -303,5 +303,5 @@ $leafExportAction = Export-PublicCertificate $leaf $leafCerPath
     LeafNotAfter = $leaf.NotAfter.ToUniversalTime().ToString("o")
     LeafPublicCertificate = $leafCerPath
     LeafPublicCertificateAction = $leafExportAction
-    CertificateThumbprintEnvironment = "CUAJONE_CERTIFICATE_SHA1=$($leaf.Thumbprint)"
+    CertificateThumbprintEnvironment = "NEXOAI_CERTIFICATE_SHA1=$($leaf.Thumbprint)"
 }

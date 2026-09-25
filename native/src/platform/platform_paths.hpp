@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace cuajone::platform {
+namespace nexoai::platform {
 
 struct PlatformPathOverrides {
     std::filesystem::path config_dir;
@@ -48,4 +48,4 @@ std::vector<std::filesystem::path> defaultModelRootCandidates(
     const std::filesystem::path& application_dir);
 }
 
-}  // namespace cuajone::platform
+}  // namespace nexoai::platform

@@ -8,8 +8,8 @@ paridad de modelos requiere artefactos y material autorizado externos.
 ## Ruta rápida
 
 1. Compila primero las pruebas CPU nativas.
-2. Compila el binding con `CUAJONE_BUILD_PYTHON_BINDINGS=ON` y Python 3.12 en D:.
-3. Ejecuta `python -m cuajone_qa parity` sin modelos ni fuentes.
+2. Compila el binding con `NEXOAI_BUILD_PYTHON_BINDINGS=ON` y Python 3.12 en D:.
+3. Ejecuta `python -m nexoai_qa parity` sin modelos ni fuentes.
 4. Usa `demo` con un fixture sintético o una fuente expresamente autorizada.
 
 ## Límites
@@ -18,9 +18,9 @@ paridad de modelos requiere artefactos y material autorizado externos.
 | --- | --- | --- |
 | `NexoAIVision.exe` | Runtime Windows con TensorRT y ONNX Runtime CPU/CUDA híbrido | Sí |
 | NexoAI Vision launcher | Inicio y perfiles RTSP seguros de producción | Sí |
-| `cuajone_native.pyd` | Binding de desarrollo/QA | No |
+| `nexoai_native.pyd` | Binding de desarrollo/QA | No |
 | `ppe_reportev2.py` | Harness local del `.pyd` con ONNX fijo, captura y reportes | No |
-| `cuajone_qa` | CLI, contratos, demos, adapters y paridad | No |
+| `nexoai_qa` | CLI, contratos, demos, adapters y paridad | No |
 | `jsonschema` | Validación requerida del runtime Python de QA | No |
 | Ultralytics/PyTorch | Backend experimental | No |
 | CVAT/Supervision | Integración opcional de anotación/datasets | No |
@@ -29,7 +29,7 @@ paridad de modelos requiere artefactos y material autorizado externos.
 `ppe_reportev2.py` conserva su import y CLI raíz para pruebas locales, pero no es
 entrada oficial de producción ni fallback. Solo orquesta configuración, captura,
 `NativeBackend`, evidencia, reportes y cierre. La analítica Ultralytics histórica
-se conserva separada en `cuajone_qa/experimental/legacy_ultralytics.py`.
+se conserva separada en `nexoai_qa/experimental/legacy_ultralytics.py`.
 
 ```mermaid
 flowchart LR
@@ -57,12 +57,12 @@ binding comparan JSON byte por byte.
 
 Los eventos usan el sobre obligatorio de CloudEvents 1.0. Sus tipos canónicos son:
 
-- `com.cuajone.safety.ppe.violation.v1`;
-- `com.cuajone.safety.fall.possible.v1`.
+- `com.nexoai.safety.ppe.violation.v1`;
+- `com.nexoai.safety.fall.possible.v1`.
 
 Esos tipos v1 permanecen como proyección explícita para consumidores estrictos.
 El runtime actual serializa los eventos EPP estructurados como
-`com.cuajone.safety.ppe.violation.v2` y usa `contracts/v2/`; consulta el
+`com.nexoai.safety.ppe.violation.v2` y usa `contracts/v2/`; consulta el
 [contrato fijo de siete EPP](ppe-contract-v2.md). Los serializers v1 y v2 son vistas
 alternativas del mismo candidato de evento, no publicaciones simultáneas.
 
@@ -83,9 +83,9 @@ Python 3.12 alojado bajo `.tools\native` y nunca usa `FetchContent` ni versiona 
 
 ```powershell
 cmake -S native -B .tools\native\build\coupling-pybind `
-  -DCUAJONE_BUILD_RUNTIME=ON `
-  -DCUAJONE_BUILD_PYTHON_BINDINGS=ON `
-  -DCUAJONE_PYBIND11_ROOT=.tools\native\venvs\coupling-py312\Lib\site-packages\pybind11\share\cmake\pybind11 `
+  -DNEXOAI_BUILD_RUNTIME=ON `
+  -DNEXOAI_BUILD_PYTHON_BINDINGS=ON `
+  -DNEXOAI_PYBIND11_ROOT=.tools\native\venvs\coupling-py312\Lib\site-packages\pybind11\share\cmake\pybind11 `
   -DPython_EXECUTABLE=.tools\native\venvs\coupling-py312\Scripts\python.exe
 cmake --build .tools\native\build\coupling-pybind --config Release
 ```
@@ -98,21 +98,21 @@ ser `uint8`, BGR, `(alto, ancho, 3)` y C-contigua; no se realizan copias implíc
 El GIL se libera durante el trabajo C++ síncrono.
 
 En Windows, Python 3.8 o posterior requiere registrar las carpetas DLL mediante
-`CUAJONE_NATIVE_DLL_DIRS`; no copies esas DLL al repositorio.
+`NEXOAI_NATIVE_DLL_DIRS`; no copies esas DLL al repositorio.
 
 ## Demo
 
 El fixture es la única ruta reproducible sin fuentes ni modelos:
 
 ```powershell
-python -m cuajone_qa demo --backend native --mode ppe-fall `
+python -m nexoai_qa demo --backend native --mode ppe-fall `
   --fixture D:\QA\fixture-sintetico.json --headless `
   --jsonl D:\QA\salida\eventos.jsonl
 ```
 
 Para una fuente autorizada, selecciona `image`, `video`, `webcam` o `rtsp` y aporta
 artefactos externos. `native` usa el adapter ByteTrack-Eigen compartido con el ejecutable. El
-módulo `cuajone_qa.experimental.legacy_ultralytics` conserva Ultralytics y
+módulo `nexoai_qa.experimental.legacy_ultralytics` conserva Ultralytics y
 ByteTrack solo para experimentos/compatibilidad y requiere el extra explícito:
 
 ```powershell

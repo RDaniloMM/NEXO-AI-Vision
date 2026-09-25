@@ -6,10 +6,10 @@ CPU. Los engines TensorRT opcionales sí usan CUDA para ambos modelos, sin Pytho
 PyTorch ni Ultralytics durante la ejecución. `Auto` prefiere CUDA solo cuando
 hardware, driver y artefactos están listos; si no, usa ONNX CPU.
 La ruta oficial de producción es el MSI aprobado -> NexoAI Vision launcher ->
-`NexoAIVision.exe`. `ppe_reportev2.py` y `cuajone_native.pyd` son exclusivamente
+`NexoAIVision.exe`. `ppe_reportev2.py` y `nexoai_native.pyd` son exclusivamente
 un harness local de desarrollo/QA y no constituyen un fallback operativo.
 El target WIN32 separado `NexoAIVisionLauncher.exe` ofrece la interfaz gráfica y no
-enlaza `cuajone_runtime`, OpenCV, ONNX Runtime, CUDA ni TensorRT.
+enlaza `nexoai_runtime`, OpenCV, ONNX Runtime, CUDA ni TensorRT.
 
 > Toolchain local: las herramientas y SDK viven bajo `.tools\native`, carpeta
 > ignorada por Git dentro del repositorio. La activación no modifica el PATH
@@ -81,7 +81,8 @@ en orden y rechazan IDs o timestamps que retrocedan hasta ejecutar `reset()`.
 - ONNX Runtime 1.25.0 CPU para Windows x64.
 - SDK C++ de TensorRT 11 compatible con los engines, con `NvInfer.h` e import lib.
 - CUDA Toolkit/runtime compatible con TensorRT y el controlador NVIDIA.
-- OpenCV C++ 4.8 o posterior con `core`, `imgproc`, `imgcodecs`, `videoio` y `highgui`.
+- OpenCV C++ 4.8 o posterior con `core`, `imgproc`, `imgcodecs` y `videoio`.
+- Qt 6 (Widgets y Gui) para todas las interfaces gráficas.
 - Driver NVIDIA cuya Driver API reporte al menos `12090` (CUDA 12.9) y GPU
   seleccionable mediante CUDA.
 
@@ -123,7 +124,7 @@ cmake --build --preset windows-msvc-release
 ctest --test-dir ..\.tools\native\build\presets\windows-msvc --output-on-failure
 ```
 
-El preset CPU compila el ejecutable y el probe con `CUAJONE_ENABLE_TENSORRT=OFF`:
+El preset CPU compila el ejecutable y el probe con `NEXOAI_ENABLE_TENSORRT=OFF`:
 no busca ni enlaza CUDA/TensorRT. El preset completo habilita ambos backends.
 
 ### Integración ONNX CUDA real
@@ -155,8 +156,8 @@ ambiguas. También incluye los módulos `cudnn*.dll` del root local porque cuDNN
 los carga dinámicamente y no los declara como imports PE. Copia el cierre resuelto
 junto al ejecutable de prueba. No usa,
 modifica, genera ni instala `installer\stage` ni ningún MSI. Si los modelos están
-en otro root local, reemplaza `CUAJONE_ONNX_CUDA_PPE_MODEL` y
-`CUAJONE_ONNX_CUDA_POSE_MODEL` al configurar.
+en otro root local, reemplaza `NEXOAI_ONNX_CUDA_PPE_MODEL` y
+`NEXOAI_ONNX_CUDA_POSE_MODEL` al configurar.
 
 ```powershell
 . .\activate-native.ps1 -CpuOnly
@@ -247,7 +248,7 @@ Los modelos se resuelven únicamente desde el bundle administrado junto al runti
   models\pose.onnx
 %ProgramData%\NexoAI Vision\runtime\
   output\
-  logs\cuajone-<timestamp>.log
+  logs\nexoai-<timestamp>.log
 ```
 
 La validación estructural exige un conjunto administrado completo. CPU requiere los
@@ -280,7 +281,7 @@ el ejecutable llegó al probe sin cargar `nvcuda.dll` de forma anticipada.
 `--compute cpu` nunca ejecuta este probe. El CLI
 explícito tiene prioridad sobre `HKLM\SOFTWARE\NexoAI Vision\ComputeMode`. Si esa
 clave no existe, el runtime conserva compatibilidad de lectura con
-`HKLM\SOFTWARE\Cuajone PPE Monitor\ComputeMode`.
+`HKLM\SOFTWARE\NexoAI PPE Monitor\ComputeMode`.
 TensorRT 11 exige al menos SM 7.5; una GPU anterior no se declara lista aunque la
 API del driver CUDA inicialice. Sin `--device`, el runtime elige el primer índice
 compatible; un índice explícito inexistente o inferior a SM 7.5 falla cerrado.
@@ -292,10 +293,10 @@ build\windows-msvc\Release\NexoAIVision.exe `
   --preflight `
   --compute cuda `
   --source C:\video-autorizado\turno.mp4 `
-  --source-label CAM_CUAJONE_01 `
+  --source-label CAM_NEXOAI_01 `
   --ppe-engine C:\models\ppe.engine `
   --pose-engine C:\models\pose.engine `
-  --output C:\resultados\cuajone
+  --output C:\resultados\nexoai
 ```
 
 Para CPU reemplaza engines por `--ppe-onnx`, `--pose-onnx` y declara el orden de
@@ -479,19 +480,19 @@ SM, TensorRT, CUDA, driver, precisión, tamaño y forma usados en el host final.
 
 ## Pruebas
 
-`cuajone_cpu_tests` cubre sin GPU el prefijo y JSON de metadata, surrogate pairs,
+`nexoai_cpu_tests` cubre sin GPU el prefijo y JSON de metadata, surrogate pairs,
 URLs/redacción RTSP, letterbox, rechazo no-finito, decode detect/pose, orden de NMS,
 límites de detección, el pose end-to-end real, defensas de constructores,
 continuidad/oclusión/expiración/reset/capacidad/empates de ByteTrack, asociación y
 votación EPP, confirmación/recuperación de caída, las 120
 combinaciones de política de cómputo y la selección multidispositivo. El target
-`cuajone_onnx_tests` genera protobufs sintéticos y cubre inferencia positiva desde
+`nexoai_onnx_tests` genera protobufs sintéticos y cubre inferencia positiva desde
 memoria, manifest/hash/rol/I/O, extensión, límites, external data y dominios custom.
-`cuajone_launcher_tests` cubre la matriz Auto/CUDA/CPU para ambos modos, manifests
+`nexoai_launcher_tests` cubre la matriz Auto/CUDA/CPU para ambos modos, manifests
 y labels CPU, omisión pose en `PPE only`, quoting de `CreateProcessW` y redacción
 de credenciales RTSP.
 
-`cuajone_onnx_cuda_integration_tests` es el contrato GPU opt-in: ONNX Runtime debe
+`nexoai_onnx_cuda_integration_tests` es el contrato GPU opt-in: ONNX Runtime debe
 ejecutar el grafo PPE real mediante `CUDAExecutionProvider`, el pose real debe
 completar una inferencia aislada mediante `CPUExecutionProvider` y el
 `NativeEnginePipeline` debe cargar ambos modelos reales con esa misma división,
@@ -527,25 +528,25 @@ warmup y cada diez frames medidos. El reporte de telemetría JSON sigue siendo l
 única línea final de la salida.
 
 Los builds de diagnóstico interno de la integración ONNX CUDA aceptan exclusivamente
-para comparación local `CUAJONE_INTERNAL_SERIAL_HYBRID_BENCHMARK=1` junto con
+para comparación local `NEXOAI_INTERNAL_SERIAL_HYBRID_BENCHMARK=1` junto con
 `--benchmark-image`. Fuerza la referencia serial PPE-CUDA/pose-CPU; no aparece en
 la ayuda, no existe en la configuración pública y los binarios normales lo ignoran.
-`CUAJONE_INTERNAL_SEPARATE_HYBRID_PREPROCESSING=1` aplica bajo las mismas condiciones
+`NEXOAI_INTERNAL_SEPARATE_HYBRID_PREPROCESSING=1` aplica bajo las mismas condiciones
 el camino legado de dos preprocessors, para benchmarks pareados solamente.
 
 La prueba TensorRT es deliberadamente opt-in y solo inspecciona un engine real:
 
 ```powershell
 cmake -S . -B build\trt-smoke `
-  -DCUAJONE_ENABLE_TRT_INTEGRATION_TESTS=ON `
-  -DCUAJONE_TEST_ENGINE=C:\models\compatible.engine
+  -DNEXOAI_ENABLE_TRT_INTEGRATION_TESTS=ON `
+  -DNEXOAI_TEST_ENGINE=C:\models\compatible.engine
 ```
 
 No ejecutes esa ruta hasta validar toolchain, SDK, GPU y engine en el host destino.
 
 ### Binding Python de QA
 
-`CUAJONE_BUILD_PYTHON_BINDINGS` vale `OFF` por defecto. Con `ON`, CMake exige
+`NEXOAI_BUILD_PYTHON_BINDINGS` vale `OFF` por defecto. Con `ON`, CMake exige
 Python 3.12 y `pybind11` 3.0.4 desde una ruta explícita bajo `.tools\native`. El ejecutable no
 enlaza Python. Consulta la [guía de acoplamiento](../docs/python-cpp-coupling.md)
 para compilación, API sintética, runtime externo y paridad.

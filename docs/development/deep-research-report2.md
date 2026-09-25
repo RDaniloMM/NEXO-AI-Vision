@@ -4,7 +4,7 @@
 **Ámbito:** visión por computadora para detección de EPP y caídas mediante cámaras IP, YOLO/C++, cómputo CPU/GPU, procesamiento paralelo y distribuido, escalabilidad, seguridad y robustez adversarial.  
 **Repositorio analizado:** `jeanpaulandradeleiva-crypto/CAMARAS-IP-CUAJONE`
 
-**[Descargar el informe completo en Markdown](sandbox:/mnt/data/investigacion_vision_hpc_robustez_cuajone.md)**
+**[Descargar el informe completo en Markdown](sandbox:/mnt/data/investigacion_vision_hpc_robustez_nexoai.md)**
 
 ## Resumen ejecutivo
 
@@ -12,16 +12,16 @@ El análisis del repositorio cambia de manera importante la recomendación arqui
 
 Por ello, la estrategia de mayor retorno **no es reescribir el proyecto ni introducir Kubernetes, Ray o MPI en la ruta crítica inmediatamente**. Conviene fortalecer cuatro frentes, en este orden:
 
-1. **Calidad y reproducibilidad de datos/modelos:** dataset Cuajone estratificado, hard-negative mining, particiones por cámara/video y challenge sets de noche, oclusión, objetos pequeños, camuflaje y ataques físicos.
+1. **Calidad y reproducibilidad de datos/modelos:** dataset NexoAI estratificado, hard-negative mining, particiones por cámara/video y challenge sets de noche, oclusión, objetos pequeños, camuflaje y ataques físicos.
 2. **Profiling y optimización del runtime nativo:** eliminar sincronizaciones/copias innecesarias, preasignar memoria, evaluar pinned memory, ejecución asíncrona y paralelismo entre cámaras.
 3. **Robustez del detector:** entrenamiento con datos reales difíciles, domain adaptation, adversarial training/fine-tuning, estrategias para small objects y calibración de los puntos de operación.
 4. **Escala distribuida:** recién cuando la carga requiera múltiples GPU/hosts, incorporar un plano de control Kubernetes y usar Ray/Horovod/MPI en las funciones para las que realmente fueron diseñados. La documentación CUDA recomienda precisamente un ciclo de medición, optimización de transferencias y aprovechamiento de ejecución asíncrona antes de asumir beneficios por concurrencia. citeturn22search0turn22search10
 
 El cuello de botella arquitectónico más evidente está explícitamente documentado por el propio proyecto: **los modelos PPE y pose se ejecutan actualmente en secuencia; PPE termina y sincroniza antes de iniciar pose, sin colas GPU ni ejecución concurrente por frame**. Además, esto no es simplemente deuda técnica: con ONNX Runtime CUDA 1.25, el grafo pose presenta una falla en la GTX 1650 Ti del entorno, mientras PPE sí se ejecuta en CUDA; por ello el modo híbrido PPE-CUDA/pose-CPU es deliberado. La optimización correcta es experimentar primero en TensorRT —donde ambos modelos pueden residir en GPU— y conservar el fallback actual hasta demostrar estabilidad y paridad. fileciteturn3file0L2-L2
 
-Desde el punto de vista de precisión del sistema, la literatura reciente apunta a que **los datos del dominio y los hard cases tienen prioridad sobre el preprocesamiento cosmético**. Un estudio de WACV 2024 sobre detección bajo clima adverso encontró que entrenar con imágenes reales all-weather funcionó mejor que sus alternativas sintéticas y que aplicar denoising antes del detector fue la estrategia menos efectiva de las evaluadas. Esto es particularmente importante para Cuajone: CLAHE, gamma correction, Retinex o una red de low-light enhancement deben considerarse hipótesis experimentales, no mejoras garantizadas. citeturn21search10
+Desde el punto de vista de precisión del sistema, la literatura reciente apunta a que **los datos del dominio y los hard cases tienen prioridad sobre el preprocesamiento cosmético**. Un estudio de WACV 2024 sobre detección bajo clima adverso encontró que entrenar con imágenes reales all-weather funcionó mejor que sus alternativas sintéticas y que aplicar denoising antes del detector fue la estrategia menos efectiva de las evaluadas. Esto es particularmente importante para NexoAI: CLAHE, gamma correction, Retinex o una red de low-light enhancement deben considerarse hipótesis experimentales, no mejoras garantizadas. citeturn21search10
 
-Para EPP pequeños o distantes, **SAHI** es una de las técnicas con evidencia más directamente aplicable: su trabajo de ICIP 2022 reportó mejoras de AP de 5.1–6.8 puntos usando slicing solamente en inferencia sobre sus benchmarks, y mejoras acumuladas mayores cuando también se realizó fine-tuning con slicing. El costo es computacional, por lo que para Cuajone encaja mejor como una ruta selectiva en cámaras lejanas o como “segunda mirada” sobre regiones dudosas, no necesariamente sobre todos los frames. citeturn15search0
+Para EPP pequeños o distantes, **SAHI** es una de las técnicas con evidencia más directamente aplicable: su trabajo de ICIP 2022 reportó mejoras de AP de 5.1–6.8 puntos usando slicing solamente en inferencia sobre sus benchmarks, y mejoras acumuladas mayores cuando también se realizó fine-tuning con slicing. El costo es computacional, por lo que para NexoAI encaja mejor como una ruta selectiva en cámaras lejanas o como “segunda mirada” sobre regiones dudosas, no necesariamente sobre todos los frames. citeturn15search0
 
 Respecto al ejemplo de prendas diseñadas para dificultar la detección, la amenaza tiene soporte científico mucho más sólido que una noticia aislada. *Adversarial T-shirt*, AdvCaT y trabajos posteriores demuestran que texturas físicas sobre ropa pueden reducir la capacidad de detectores de personas bajo cambios de postura, distancia y vista. Más recientemente, **PBCAT** propone adversarial training contra patches y texturas físicamente realizables, mientras **TRACE** estudia fine-tuning adversarial sobre YOLOv5/YOLOv8 con ataques no vistos y ensayos físicos. citeturn5search1turn20search6turn20search0turn20search10
 
@@ -33,7 +33,7 @@ La conclusión estratégica es:
 
 Invertir ese orden suele trasladar problemas de precisión o latencia a una infraestructura más compleja sin resolverlos.
 
-## Diagnóstico del proyecto Cuajone y prioridades de reestructuración
+## Diagnóstico del proyecto NexoAI y prioridades de reestructuración
 
 El árbol actual del repositorio ya presenta una separación razonablemente madura. Existen módulos C++ para `capture`, `preprocess`, `yolo_decode`, `onnx_session`, `tensorrt_runtime`, `engine_pipeline`, `byte_tracker`, `ppe_analytics`, `fall_analytics`, `evidence`, `performance_telemetry`, manifests y contratos; además hay pruebas específicas de ONNX CUDA y TensorRT, herramientas de benchmark/exportación/evaluación y un paquete Python de QA separado del producto. fileciteturn2file0L2-L2
 
@@ -44,7 +44,7 @@ La siguiente tabla resume dónde concentraría el esfuerzo:
 | Prioridad | Intervención | Resultado buscado | Motivo |
 |---|---|---|---|
 | **P0** | Baseline reproducible de calidad + rendimiento | Saber exactamente dónde se pierden recall, mAP y milisegundos | Optimizar sin baseline impide atribuir mejoras. |
-| **P0** | Dataset Cuajone por cámaras/turnos/hard cases | Mejor generalización real | La literatura bajo clima adverso favorece entrenamiento representativo sobre “arreglar” la imagen a posteriori. citeturn21search10turn21search1 |
+| **P0** | Dataset NexoAI por cámaras/turnos/hard cases | Mejor generalización real | La literatura bajo clima adverso favorece entrenamiento representativo sobre “arreglar” la imagen a posteriori. citeturn21search10turn21search1 |
 | **P0** | Nsight + TensorRT profiling | Identificar sincronizaciones, copias y esperas CPU/GPU | CUDA recomienda medir transferencias, sincronización y concurrencia en streams explícitamente. citeturn22search0turn22search10 |
 | **P0** | Calibración de thresholds por clase | Mejor punto Precision/Recall/F1 | Cambia el punto operativo sin necesidad de cambiar el detector; debe hacerse exclusivamente en validación. |
 | **P1** | Scheduler multicámara con colas acotadas | Mayor throughput con latencia controlada | Se adapta al modelo `latest frame` que el proyecto ya usa. fileciteturn3file0L2-L2 |
@@ -60,14 +60,14 @@ También conviene mantener la política actual de no declarar una equivalencia c
 
 ## Literatura priorizada y recursos
 
-La priorización siguiente combina tres criterios: aplicabilidad inmediata a Cuajone, solidez de la fuente y actualidad. Los artículos recientes de los últimos ocho años tienen preferencia, manteniendo algunos clásicos cuya técnica sigue siendo central.
+La priorización siguiente combina tres criterios: aplicabilidad inmediata a NexoAI, solidez de la fuente y actualidad. Los artículos recientes de los últimos ocho años tienen preferencia, manteniendo algunos clásicos cuya técnica sigue siendo central.
 
 **Libros recomendados**
 
 | Prioridad | Libro | Por qué leerlo |
 |---|---|---|
 | **P0** | **Hwu, Kirk, El Hajj — *Programming Massively Parallel Processors: A Hands-on Approach*, 4.ª ed. (2022).** [Elsevier/ScienceDirect](https://www.sciencedirect.com/book/9780323912310/programming-massively-parallel-processors) | Es probablemente el libro más directamente útil para el runtime nativo: jerarquía de memoria GPU, localidad, CUDA, patrones paralelos, streams y cómputo heterogéneo. Da la base necesaria para decidir dónde el paralelismo GPU realmente ayuda y dónde solo aumenta sincronización. citeturn13search0 |
-| **P0** | **Sterling, Brodowicz, Anderson — *High Performance Computing: Modern Systems and Practices*, 2.ª ed. (2024).** [Elsevier](https://www.sciencedirect.com/book/9780443133645/high-performance-computing) | Marco integral de arquitectura HPC, paralelismo, aceleradores, performance debugging y sistemas modernos. Es la referencia apropiada para pensar la evolución de Cuajone desde un nodo edge hacia una topología multi-GPU o distribuida. citeturn1search0 |
+| **P0** | **Sterling, Brodowicz, Anderson — *High Performance Computing: Modern Systems and Practices*, 2.ª ed. (2024).** [Elsevier](https://www.sciencedirect.com/book/9780443133645/high-performance-computing) | Marco integral de arquitectura HPC, paralelismo, aceleradores, performance debugging y sistemas modernos. Es la referencia apropiada para pensar la evolución de NexoAI desde un nodo edge hacia una topología multi-GPU o distribuida. citeturn1search0 |
 | **P0** | **Andrist, Sehr, Garney — *C++ High Performance*, 2.ª ed. (2020).** [Packt](https://www.packtpub.com/) | Orientado a rendimiento real en C++ moderno: layouts de datos, memoria, concurrencia, profiling y reducción de overhead. Es más directamente accionable sobre `native/src/*` que un texto genérico de IA. citeturn1search1 |
 | **P1** | **Deakin, Mattson — *Programming Your GPU with OpenMP* (2023).** [MIT Press](https://mitpress.mit.edu/9780262547536/programming-your-gpu-with-openmp/) | Ofrece una visión portable de offload CPU/GPU. TensorRT/CUDA seguirá siendo la ruta natural para inferencia, pero OpenMP resulta relevante para kernels auxiliares, algoritmos CPU y portabilidad. citeturn1search15 |
 | **P1** | **van der Pas, Stotzer, Terboven — *Using OpenMP—The Next Step* (2017).** [MIT Press](https://mitpress.mit.edu/9780262534789/using-openmp-the-next-step/) | Clásico avanzado sobre tasking, SIMD y afinidad. Aunque anterior al horizonte de ocho años, sigue siendo valioso para paralelizar pre/postprocesamiento y cargas CPU. citeturn1search7 |
@@ -78,25 +78,25 @@ La priorización siguiente combina tres criterios: aplicabilidad inmediata a Cua
 |---|---|---|
 | **P0** | **PBCAT: Patch-Based Composite Adversarial Training against Physically Realizable Attacks on Object Detection — ICCV 2025.** [CVF](https://openaccess.thecvf.com/content/ICCV2025/html/Li_PBCAT_Patch-Based_Composite_Adversarial_Training_against_Physically_Realizable_Attacks_on_ICCV_2025_paper.html) | Adversarial training unificado contra patches y perturbaciones que busca generalizar también a texturas físicas no vistas. En sus experimentos, reporta una mejora de 29.7% de accuracy de detección frente a defensas previas bajo uno de los ataques de textura considerados. Es el candidato científico más directo para la fase de robustez. citeturn20search0 |
 | **P0** | **TRACE: Confounder-free Adversarial Fine-tuning for Robust Object Detection — WACV 2026.** [CVF](https://openaccess.thecvf.com/content/WACV2026/html/Lee_TRACE_Confounder-free_Adversarial_Fine-tuning_for_Robust_Object_Detection_WACV_2026_paper.html) | Fine-tuning orientado a evitar sobreajuste a un patch específico, tratando ubicación, rotación y brillo como confusores. Fue probado en YOLOv5/YOLOv8, ataques no vistos y un testbed físico, por lo que es especialmente relevante al stack YOLO. citeturn20search10 |
-| **P0** | **Physically Realizable Natural-Looking Clothing Textures Evade Person Detectors via 3D Modeling — CVPR 2023.** [CVF](https://openaccess.thecvf.com/content/CVPR2023/html/Hu_Physically_Realizable_Natural-Looking_Clothing_Textures_Evade_Person_Detectors_via_3D_CVPR_2023_paper.html) | AdvCaT muestra que una amenaza física puede adoptar apariencia de textura/camuflaje normal y mantener efectividad entre diferentes ángulos. Para Cuajone implica que un challenge set no debe limitarse a patches cuadrados obvios. citeturn20search6 |
+| **P0** | **Physically Realizable Natural-Looking Clothing Textures Evade Person Detectors via 3D Modeling — CVPR 2023.** [CVF](https://openaccess.thecvf.com/content/CVPR2023/html/Hu_Physically_Realizable_Natural-Looking_Clothing_Textures_Evade_Person_Detectors_via_3D_CVPR_2023_paper.html) | AdvCaT muestra que una amenaza física puede adoptar apariencia de textura/camuflaje normal y mantener efectividad entre diferentes ángulos. Para NexoAI implica que un challenge set no debe limitarse a patches cuadrados obvios. citeturn20search6 |
 | **P0** | **Unified Adversarial Patch for Cross-Modal Attacks in the Physical World — ICCV 2023.** [CVF](https://openaccess.thecvf.com/content/ICCV2023/html/Wei_Unified_Adversarial_Patch_for_Cross-Modal_Attacks_in_the_Physical_World_ICCV_2023_paper.html) | Demuestra un único artefacto capaz de atacar detectores visible e infrarrojo y valida el ataque bajo distintos ángulos, distancias, posturas y escenarios físicos. Es una advertencia fundamental contra considerar RGB+thermal una defensa suficiente por sí sola. citeturn20search3 |
 | **P0** | **LLVIP: A Visible-Infrared Paired Dataset for Low-light Vision — 2021.** [arXiv](https://arxiv.org/abs/2108.10831) | Contiene 30,976 imágenes, es decir 15,488 pares visible/infrarrojo alineados, predominantemente en escenas muy oscuras, con peatones etiquetados. Es uno de los mejores bancos públicos para una PoC de baja iluminación. citeturn21academia36 |
 | **P0** | **Camo-M3FD: A New Benchmark Dataset for Cross-Spectral Camouflaged Pedestrian Detection — CVPR Workshops 2026.** [CVF](https://openaccess.thecvf.com/content/CVPR2026W/SVC/html/Velesaca_Camo-M3FD_A_New_Benchmark_Dataset_for_Cross-Spectral_Camouflaged_Pedestrian_Detection_CVPRW_2026_paper.html) | Benchmark visible-termal específicamente construido alrededor de peatones camuflados; sus resultados muestran que la señal térmica aporta localización crítica y la fusión mejora la recuperación estructural. Es muy cercano al problema de vigilancia de seguridad planteado. citeturn21search0 |
-| **P0** | **Slicing Aided Hyper Inference and Fine-Tuning for Small Object Detection — ICIP 2022.** [DOI](https://doi.org/10.1109/ICIP46576.2022.9897990) | SAHI divide imágenes de alta resolución en regiones para aumentar el tamaño aparente de objetos pequeños. Los autores reportan incrementos importantes de AP en VisDrone/xView; en Cuajone debe probarse para cascos, lentes, guantes u otros EPP alejados. citeturn15search0 |
-| **P0** | **YOLOv10: Real-Time End-to-End Object Detection — 2024.** [arXiv](https://arxiv.org/abs/2405.14458) | Referencia moderna sobre el compromiso accuracy/latency y eliminación de NMS mediante consistent dual assignments. Conviene usarlo como benchmark arquitectónico, no asumir que cambiar al detector más reciente superará al modelo Cuajone fine-tuned. citeturn0search0 |
+| **P0** | **Slicing Aided Hyper Inference and Fine-Tuning for Small Object Detection — ICIP 2022.** [DOI](https://doi.org/10.1109/ICIP46576.2022.9897990) | SAHI divide imágenes de alta resolución en regiones para aumentar el tamaño aparente de objetos pequeños. Los autores reportan incrementos importantes de AP en VisDrone/xView; en NexoAI debe probarse para cascos, lentes, guantes u otros EPP alejados. citeturn15search0 |
+| **P0** | **YOLOv10: Real-Time End-to-End Object Detection — 2024.** [arXiv](https://arxiv.org/abs/2405.14458) | Referencia moderna sobre el compromiso accuracy/latency y eliminación de NMS mediante consistent dual assignments. Conviene usarlo como benchmark arquitectónico, no asumir que cambiar al detector más reciente superará al modelo NexoAI fine-tuned. citeturn0search0 |
 | **P1** | **Adversarial T-shirt! Evading Person Detectors in a Physical World — 2019/ECCV 2020.** [arXiv](https://arxiv.org/abs/1910.11099) | Referencia clásica para prendas adversariales no rígidas. Los autores reportaron ataques tanto digitales como físicos contra detectores de personas, demostrando que la deformación de tela no elimina necesariamente el efecto adversarial. citeturn5search1 |
 | **P1** | **Jedi: Entropy-Based Localization and Removal of Adversarial Patches — CVPR 2023.** [CVF](https://openaccess.thecvf.com/content/CVPR2023/html/Tarchoun_Jedi_Entropy-Based_Localization_and_Removal_of_Adversarial_Patches_CVPR_2023_paper.html) | Defensa model-agnostic basada en entropía y reconstrucción; sus benchmarks reportan en promedio 90% de detección de patches y recuperación de hasta 94% de ataques exitosos. Es una posible segunda capa, no sustituto del adversarial training. citeturn20search1 |
 | **P1** | **Beyond Fusion: Modality Hallucination-Based Multispectral Fusion for Pedestrian Detection — WACV 2024.** [CVF](https://openaccess.thecvf.com/content/WACV2024/html/Xie_Beyond_Fusion_Modality_Hallucination-Based_Multispectral_Fusion_for_Pedestrian_Detection_WACV_2024_paper.html) | Introduce una rama que aprende a compensar la degradación del canal visible antes de fusionar información térmica/visible. Es una referencia útil si el proyecto evoluciona a cámaras multispectrales. citeturn21search6 |
 | **P1** | **Auxiliary Domain-guided Adaptive Detection in Adverse Weather Conditions — ACCV 2024.** [CVF](https://openaccess.thecvf.com/content/ACCV2024/html/Fu_Auxiliary_Domain-guided_Adaptive_Detection_in_Adverse_Weather_Conditions_ACCV_2024_paper.html) | Trabaja domain adaptation para detectores one-stage bajo clima adverso, combinando un dominio auxiliar y contrastive learning. Es transferible conceptualmente a cambios de iluminación, polvo, neblina y cámaras. citeturn21search1 |
-| **P1** | **Robust Object Detection in Challenging Weather Conditions — WACV 2024.** [CVF](https://openaccess.thecvf.com/content/WACV2024/html/Gupta_Robust_Object_Detection_in_Challenging_Weather_Conditions_WACV_2024_paper.html) | Compara datos reales, clima sintético y denoising. El resultado especialmente útil para Cuajone es que el entrenamiento sobre datos reales all-weather fue el mejor de sus enfoques, mientras el denoising previo fue el peor. citeturn21search10 |
+| **P1** | **Robust Object Detection in Challenging Weather Conditions — WACV 2024.** [CVF](https://openaccess.thecvf.com/content/WACV2024/html/Gupta_Robust_Object_Detection_in_Challenging_Weather_Conditions_WACV_2024_paper.html) | Compara datos reales, clima sintético y denoising. El resultado especialmente útil para NexoAI es que el entrenamiento sobre datos reales all-weather fue el mejor de sus enfoques, mientras el denoising previo fue el peor. citeturn21search10 |
 | **P1** | **Simple Copy-Paste Is a Strong Data Augmentation Method — CVPR 2021.** [CVF](https://openaccess.thecvf.com/content/CVPR2021/html/Ghiasi_Simple_Copy-Paste_Is_a_Strong_Data_Augmentation_Method_for_Instance_CVPR_2021_paper.html) | Sustenta el uso de Copy-Paste como augmentation. En EPP debe imponerse semántica anatómica: un casco debe copiarse sobre una cabeza plausible, no simplemente a coordenadas aleatorias. citeturn9search0 |
 | **P1** | **Distance-IoU Loss: Faster and Better Learning for Bounding Box Regression — AAAI 2020.** [AAAI](https://ojs.aaai.org/index.php/AAAI/article/view/6999) | DIoU/CIoU incorporan distancia entre centros y geometría adicional frente a IoU/GIoU. Es una referencia apropiada para experimentar con errores de localización y convergencia. citeturn16search0 |
 | **P1** | **Weighted Boxes Fusion — 2019.** [arXiv](https://arxiv.org/abs/1910.13302) | WBF combina las coordenadas y confidencias de varios predictores en lugar de descartar cajas. Es especialmente útil para ensembles y TTA, aunque implica mayor latencia. citeturn10search1 |
 | **P1** | **Ray: A Distributed Framework for Emerging AI Applications — OSDI 2018.** [USENIX](https://www.usenix.org/conference/osdi18/presentation/moritz) | Su modelo de tasks/actors está pensado para aplicaciones de IA dinámicas y distribuidas. En esta solución encaja en experimentación, HPO y procesamiento de datos, no dentro del ejecutable C++ de la cámara. citeturn2search7 |
 | **P1** | **Horovod: fast and easy distributed deep learning — 2018.** [arXiv](https://arxiv.org/abs/1802.05799) | Introduce una estrategia práctica de entrenamiento distribuido basada en allreduce. Tiene sentido cuando el entrenamiento ya justifique múltiples GPU/nodos, no como orquestador de streams RTSP. citeturn2search2 |
-| **P1** | **UP-Fall Detection Dataset: A Multimodal Approach — Sensors 2019.** [DOI](https://doi.org/10.3390/s19091988) | Dataset de caídas y actividades cotidianas con múltiples sensores y dos cámaras. Es útil para evaluar conceptos temporales, aunque sus caídas simuladas no representan por sí solas las condiciones industriales reales de Cuajone. citeturn18search0 |
+| **P1** | **UP-Fall Detection Dataset: A Multimodal Approach — Sensors 2019.** [DOI](https://doi.org/10.3390/s19091988) | Dataset de caídas y actividades cotidianas con múltiples sensores y dos cámaras. Es útil para evaluar conceptos temporales, aunque sus caídas simuladas no representan por sí solas las condiciones industriales reales de NexoAI. citeturn18search0 |
 | **Clásico** | **Focal Loss for Dense Object Detection — ICCV 2017.** [CVF](https://openaccess.thecvf.com/content_iccv_2017/html/Lin_Focal_Loss_for_ICCV_2017_paper.html) | Suprime la contribución de ejemplos fáciles y concentra entrenamiento en ejemplos difíciles, por lo que sigue siendo una referencia central cuando existe fuerte desbalance de clases/background. citeturn9search1 |
-| **Clásico** | **Soft-NMS — Improving Object Detection With One Line of Code — ICCV 2017.** [CVF](https://openaccess.thecvf.com/content_iccv_2017/html/Bodla_Soft-NMS_--_Improving_ICCV_2017_paper.html) | Reduce gradualmente scores de cajas solapadas en vez de eliminarlas abruptamente. Los autores reportaron mejoras de AP en sus detectores sin reentrenamiento; para YOLO/Cuajone debe evaluarse frente al postprocesamiento actual. citeturn16search1 |
+| **Clásico** | **Soft-NMS — Improving Object Detection With One Line of Code — ICCV 2017.** [CVF](https://openaccess.thecvf.com/content_iccv_2017/html/Bodla_Soft-NMS_--_Improving_ICCV_2017_paper.html) | Reduce gradualmente scores de cajas solapadas en vez de eliminarlas abruptamente. Los autores reportaron mejoras de AP en sus detectores sin reentrenamiento; para YOLO/NexoAI debe evaluarse frente al postprocesamiento actual. citeturn16search1 |
 
 A estas publicaciones sumaría tres referencias normativas de seguridad: **NIST AI RMF 1.0** para gestión de riesgo de IA; **NIST AI 100-2e2025** para taxonomía de adversarial machine learning, incluyendo evasión y poisoning; y **NIST SP 800-218 SSDF** para incorporar seguridad dentro del ciclo de desarrollo de software. citeturn19search5turn19search0turn19search12
 
@@ -110,7 +110,7 @@ La optimización debe distinguir **latencia**, **throughput**, **uso de memoria*
 
 Nsight Systems es apropiado para descubrir huecos entre CPU y GPU, sincronizaciones, transferencias y concurrencia; TensorRT ofrece además herramientas y recomendaciones para performance profiling. CUDA recuerda que las operaciones asíncronas y streams pueden solapar copia y cómputo, pero solo si hardware, dependencias y memoria lo permiten. citeturn22search0turn22search10
 
-**Memoria.** La guía CUDA recomienda mantener estructuras intermedias en GPU cuando sea posible, agrupar transferencias pequeñas y usar memoria page-locked/pinned cuando realmente se aprovechen transferencias asíncronas; también advierte que pinned memory es un recurso que no debe sobreutilizarse. En Cuajone esto se traduce en preasignar buffers por worker/contexto, eliminar `malloc/new/cudaMalloc` del loop por frame y medir cuántas copias introduce cada backend. citeturn22search0
+**Memoria.** La guía CUDA recomienda mantener estructuras intermedias en GPU cuando sea posible, agrupar transferencias pequeñas y usar memoria page-locked/pinned cuando realmente se aprovechen transferencias asíncronas; también advierte que pinned memory es un recurso que no debe sobreutilizarse. En NexoAI esto se traduce en preasignar buffers por worker/contexto, eliminar `malloc/new/cudaMalloc` del loop por frame y medir cuántas copias introduce cada backend. citeturn22search0
 
 **Concurrencia.** La recomendación más interesante es probar un pipeline doble:
 
@@ -127,13 +127,13 @@ La condición crítica es **no asumir aceleración lineal**. Si PPE ya ocupa tod
 
 **Micro-batching.** En una instalación con muchas cámaras, agrupar frames de cámaras independientes puede aumentar utilización GPU. La condición es mantener un límite de espera muy pequeño: un sistema de seguridad no debe acumular frames durante decenas o cientos de milisegundos solo para maximizar throughput. Plataformas de serving como Triton soportan dynamic batching precisamente para explotar este compromiso entre throughput y queue delay. citeturn11search2
 
-Para Cuajone, el batching debería limitarse a la **porción stateless de inferencia**. ByteTrack, historial de EPP y detección temporal de caídas deben seguir separados y ordenados por cámara.
+Para NexoAI, el batching debería limitarse a la **porción stateless de inferencia**. ByteTrack, historial de EPP y detección temporal de caídas deben seguir separados y ordenados por cámara.
 
 **Precision reducida.** La secuencia experimental sería:
 
 `FP32 baseline → FP16 TensorRT → INT8 solo con calibration/evaluation`.
 
-FP16 es normalmente el candidato inicial porque TensorRT está diseñado para explotar precision reducida, pero cualquier cambio debe validarse contra el conjunto Cuajone, por clase y hard case. INT8 puede reducir memoria y acelerar inferencia, pero una regresión de recall en casco o persona vuelve irrelevante la ganancia de FPS. citeturn0search4turn22search10
+FP16 es normalmente el candidato inicial porque TensorRT está diseñado para explotar precision reducida, pero cualquier cambio debe validarse contra el conjunto NexoAI, por clase y hard case. INT8 puede reducir memoria y acelerar inferencia, pero una regresión de recall en casco o persona vuelve irrelevante la ganancia de FPS. citeturn0search4turn22search10
 
 **Rol real de los frameworks distribuidos.**
 
@@ -240,7 +240,7 @@ Para el sistema RGB existente, la primera línea no debería ser una nueva red d
 
 **Domain adaptation.** Cuando una cámara nueva tenga un dominio visual distinto —altura, lente, fondo, iluminación, compresión—, puede ser más eficiente adaptar el detector que volver a entrenarlo desde cero. ACCV 2024 muestra un método de adaptación one-stage bajo clima adverso usando dominio auxiliar y contraste; otros trabajos recientes estudian adaptación de video bajo degradaciones. citeturn21search1turn21search9
 
-Para Cuajone, una adaptación prudente sería **offline y aprobada**, no online automática. El flujo actual de promoción con procedencia/paridad ya favorece ese modelo de gobernanza. fileciteturn4file0L2-L2
+Para NexoAI, una adaptación prudente sería **offline y aprobada**, no online automática. El flujo actual de promoción con procedencia/paridad ya favorece ese modelo de gobernanza. fileciteturn4file0L2-L2
 
 **Ángulos extremos y lentes.** El entrenamiento debe incorporar transformaciones de perspectiva y escala físicamente plausibles, pero la evidencia real por cámara es insustituible. En cámaras fisheye o gran angular, conviene evaluar entrenamiento explícito con esa distorsión, rectificación selectiva o un modelo adaptado al dominio. No es recomendable “corregir” toda imagen por defecto sin medir el efecto sobre detector y latencia.
 
@@ -286,7 +286,7 @@ Hay una distinción muy importante para el proyecto:
 
 El threshold debe seleccionarse sobre `validation` y congelarse antes de abrir `test`. Elegirlo sobre test introduce optimismo. Para clases de costo desigual —por ejemplo, no detectar casco vs. generar una falsa alarma— tiene sentido usar thresholds específicos por clase.
 
-**Cómo subir Precision.** Las palancas principales son mejorar hard negatives, etiquetas ambiguas, postprocesamiento y calibración. Soft-NMS puede ayudar cuando cajas correctas compiten en zonas densas, mientras un segundo clasificador/verificador puede filtrar alarmas dudosas. Soft-NMS reportó incrementos de mAP en los detectores evaluados por sus autores sin modificar el training, pero ese resultado no debe extrapolarse automáticamente al decoder YOLO de Cuajone. citeturn16search1
+**Cómo subir Precision.** Las palancas principales son mejorar hard negatives, etiquetas ambiguas, postprocesamiento y calibración. Soft-NMS puede ayudar cuando cajas correctas compiten en zonas densas, mientras un segundo clasificador/verificador puede filtrar alarmas dudosas. Soft-NMS reportó incrementos de mAP en los detectores evaluados por sus autores sin modificar el training, pero ese resultado no debe extrapolarse automáticamente al decoder YOLO de NexoAI. citeturn16search1
 
 **Cómo subir Recall.** Para EPP tiende a ser especialmente valioso mejorar resolución efectiva, balancear clases poco frecuentes, incluir ejemplos parciales/ocultos y recuperar small objects con SAHI/ROI crops. Reducir el confidence threshold también sube recall, pero normalmente a costa de precision; por ello no reemplaza las mejoras de training. citeturn15search0
 
@@ -339,13 +339,13 @@ Una mejora no debería promocionarse simplemente porque aumenta el mAP agregado.
 
 ## Recomendaciones prácticas y plan experimental
 
-La prioridad absoluta es construir un **Cuajone Safety Vision Benchmark** interno. Los datasets públicos son útiles para pretraining y stress testing, pero la evidencia decisiva debe proceder de cámaras, lentes, posiciones, compresión, iluminación, fondos y EPP reales del sitio.
+La prioridad absoluta es construir un **NexoAI Safety Vision Benchmark** interno. Los datasets públicos son útiles para pretraining y stress testing, pero la evidencia decisiva debe proceder de cámaras, lentes, posiciones, compresión, iluminación, fondos y EPP reales del sitio.
 
 Una composición razonable sería:
 
 | Dataset | Uso |
 |---|---|
-| **Cuajone interno** | Benchmark principal y criterio de promoción |
+| **NexoAI interno** | Benchmark principal y criterio de promoción |
 | **LLVIP** | Noche y experimentos visible/infrarrojo. citeturn21academia36 |
 | **Camo-M3FD** | Camuflaje cross-spectral. citeturn21search0 |
 | **AdvT-shirt-1K** | Ropa/patch adversarial físico. citeturn20search4 |
@@ -376,9 +376,9 @@ La prueba debe usar los mismos clips y medir no solo FPS, sino p95/p99, VRAM, CP
 
 **Tabla de técnicas, beneficios, límites y costo**
 
-| Técnica | Beneficio principal | Limitación | Costo de ingeniería | Prioridad Cuajone |
+| Técnica | Beneficio principal | Limitación | Costo de ingeniería | Prioridad NexoAI |
 |---|---|---|---|---|
-| Dataset Cuajone + hard negatives | Precision/Recall/robustez | Requiere anotación y disciplina de datos | Medio | **P0** |
+| Dataset NexoAI + hard negatives | Precision/Recall/robustez | Requiere anotación y disciplina de datos | Medio | **P0** |
 | Split por cámara/video | Evaluación honesta | Puede bajar métricas “aparentes” | Bajo | **P0** |
 | Threshold por clase | Mejor F1/punto operativo | No mejora el modelo ni mAP por sí mismo | Bajo | **P0** |
 | FP16 TensorRT | Latencia/throughput/VRAM | Requiere regression test | Bajo–medio | **P0** |
@@ -418,7 +418,7 @@ Para entrenamiento, **una GPU de memoria amplia suele ser el siguiente escalón 
 
 ```mermaid
 gantt
-    title Hoja de ruta experimental Cuajone Vision
+    title Hoja de ruta experimental NexoAI Vision
     dateFormat  YYYY-MM-DD
     axisFormat  %d-%b
 

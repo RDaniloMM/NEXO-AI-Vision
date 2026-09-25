@@ -10,20 +10,68 @@ param(
 
     [string]$AcceptanceRoot,
     [string]$WixToolRoot,
-    [string]$SignToolPath = $env:CUAJONE_SIGNTOOL_PATH,
+    [string]$SignToolPath = $env:NEXOAI_SIGNTOOL_PATH,
 
     [ValidateSet("NotSigned", "Signed")]
     [string]$ExpectedSignatureStatus = "NotSigned",
 
     [switch]$AllowInternalPilotTrust,
-    [string]$CertificateThumbprint = $env:CUAJONE_CERTIFICATE_SHA1,
-    [string]$PilotRootCertificatePath = $env:CUAJONE_PILOT_ROOT_CER,
+    [string]$CertificateThumbprint = $env:NEXOAI_CERTIFICATE_SHA1,
+    [string]$PilotRootCertificatePath = $env:NEXOAI_PILOT_ROOT_CER,
 
     [switch]$FastPreview
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# Some locked-down Windows PowerShell installations omit Get-FileHash. Keep
+# this verifier independently runnable, rather than requiring the packaging
+# script to have first defined its compatible implementation in the session.
+if (-not (Get-Command -Name Get-FileHash -ErrorAction SilentlyContinue)) {
+    function Get-FileHash {
+        [CmdletBinding()]
+        param(
+            [ValidateSet("SHA1", "SHA256", "SHA384", "SHA512", "MD5")]
+            [string]$Algorithm = "SHA256",
+            [Parameter(Mandatory)]
+            [string]$LiteralPath
+        )
+
+        $path = (Resolve-Path -LiteralPath $LiteralPath -ErrorAction Stop).Path
+        $stream = [System.IO.File]::Open(
+            $path,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::Read)
+        try {
+            $hasher = [System.Security.Cryptography.HashAlgorithm]::Create($Algorithm)
+            try {
+                $bytes = $hasher.ComputeHash($stream)
+            } finally {
+                $hasher.Dispose()
+            }
+        } finally {
+            $stream.Dispose()
+        }
+
+        [pscustomobject]@{
+            Algorithm = $Algorithm
+            Hash = ([System.BitConverter]::ToString($bytes)).Replace("-", "")
+            Path = $path
+        }
+    }
+}
+
+# Use the Security module matching this Windows PowerShell host. This avoids
+# PowerShell 7 module conflicts during the unsigned-preview signature check.
+if (-not (Get-Command -Name Get-AuthenticodeSignature -ErrorAction SilentlyContinue)) {
+    $securityModule = Join-Path $PSHOME "Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1"
+    if (-not (Test-Path -LiteralPath $securityModule -PathType Leaf)) {
+        throw "Windows PowerShell Security module was not found: $securityModule"
+    }
+    Import-Module -Name $securityModule -ErrorAction Stop
+}
 
 $upgradeCode = "88A886C2-8F6D-4669-B6FB-7DFC1E7B0397"
 $signatureVerifier = Join-Path $PSScriptRoot "sign-release.ps1"
@@ -153,8 +201,8 @@ $expectedActiveNames = @(
 $activeCandidates = @(Get-ChildItem -LiteralPath (Split-Path -Parent $installer) -File | Where-Object {
     $_.Name -like 'NexoAIVision-*-x64*.msi' -or
     $_.Name -like 'NexoAIVision-*-x64*.msi.sha256' -or
-    $_.Name -like 'CuajonePPEMonitor-*-x64*.msi' -or
-    $_.Name -like 'CuajonePPEMonitor-*-x64*.msi.sha256'
+    $_.Name -like 'NexoAIPPEMonitor-*-x64*.msi' -or
+    $_.Name -like 'NexoAIPPEMonitor-*-x64*.msi.sha256'
 })
 if ($activeCandidates.Count -ne 2 -or @($activeCandidates.Name | Where-Object {
         $_ -notin $expectedActiveNames
@@ -294,6 +342,7 @@ foreach ($entry in $stageMetadata.sourceProvenance) {
 }
 
 $expectedRepositoryMappings = [ordered]@{
+    "NexoAIVision.ico" = "installer/native/assets/icon.ico"
     "docs/README.md" = "installer/native/README.md"
     "docs/INSTALACION_WINDOWS.md" = "INSTALACION_WINDOWS.md"
     "docs/PROJECT-README.md" = "README.md"
@@ -420,13 +469,13 @@ try {
             throw "MSI is not declared per-machine through ALLUSERS=1"
         }
         $secureProperties = @($properties.SecureCustomProperties -split ';')
-        foreach ($secureProperty in @("INSTALLFOLDER", "COMPUTE_MODE", "CUDA_READY", "NVIDIA_STATUS")) {
+        foreach ($secureProperty in @("INSTALLFOLDER", "COMPUTE_MODE", "CUDA_READY", "NVIDIA_STATUS", "REMOVE_RUNTIME_DATA")) {
             if ($secureProperties -notcontains $secureProperty) {
                 throw "$secureProperty is not a secure public MSI property"
             }
         }
         if ($properties.COMPUTE_MODE -cne "auto" -or $properties.CUDA_READY -cne "0" -or
-            $properties.NVIDIA_STATUS -cne "not_probed") {
+            $properties.NVIDIA_STATUS -cne "not_probed" -or $properties.REMOVE_RUNTIME_DATA -cne "0") {
             throw "Compute properties do not have safe defaults"
         }
         if ($properties.ARPPRODUCTICON -cne "ProductIcon") {
@@ -462,7 +511,7 @@ try {
         $registrySearchRows = Get-MsiRows $database 'SELECT `Signature_`, `Root`, `Key`, `Name` FROM `RegLocator`' 4
         foreach ($expectedSearch in @(
                 [pscustomobject]@{ Property = "PREVIOUS_COMPUTE_MODE"; Key = "SOFTWARE\NexoAI Vision" },
-                [pscustomobject]@{ Property = "LEGACY_COMPUTE_MODE"; Key = "SOFTWARE\Cuajone PPE Monitor" }
+                [pscustomobject]@{ Property = "LEGACY_COMPUTE_MODE"; Key = "SOFTWARE\NexoAI PPE Monitor" }
             )) {
             $appSearch = @($appSearchRows | Where-Object { $_.Columns[0] -ceq $expectedSearch.Property })
             if ($appSearch.Count -ne 1 -or @($registrySearchRows | Where-Object {
@@ -518,6 +567,14 @@ try {
             $blockSequence[0].Columns[1] -notmatch 'CUDA_READY') {
             throw "Forced CUDA is not blocked after the hardware probe"
         }
+        $purgeSequence = @($sequenceRows | Where-Object { $_.Columns[0] -ceq "PurgeRuntimeData" })
+        $removeFilesSequence = @($sequenceRows | Where-Object { $_.Columns[0] -ceq "RemoveFiles" })
+        if ($purgeSequence.Count -ne 1 -or $removeFilesSequence.Count -ne 1 -or
+            [int]$purgeSequence[0].Columns[2] -ge [int]$removeFilesSequence[0].Columns[2] -or
+            $purgeSequence[0].Columns[1] -notmatch 'REMOVE="ALL"' -or
+            $purgeSequence[0].Columns[1] -notmatch 'REMOVE_RUNTIME_DATA="1"') {
+            throw "Optional runtime-data deletion is not guarded and sequenced before RemoveFiles"
+        }
         $uiSequenceRows = Get-MsiRows $database 'SELECT `Action`, `Condition`, `Sequence` FROM `InstallUISequence`' 3
         if (@($uiSequenceRows | Where-Object { $_.Columns[0] -ceq "DetectComputeHardware" }).Count -ne 1) {
             throw "Interactive compute detection is missing from InstallUISequence"
@@ -528,6 +585,11 @@ try {
                 $_.Columns[0] -ceq "ComputeDlg" -and $_.Columns[1] -ceq "NexoAI Vision - Compute"
             }).Count -ne 1) {
             throw "Compute selection dialog is missing or has the wrong product title"
+        }
+        if (@($dialogRows | Where-Object {
+                $_.Columns[0] -ceq "RemoveDataDlg" -and $_.Columns[1] -ceq "NexoAI Vision - Uninstall"
+            }).Count -ne 1) {
+            throw "Uninstall data-retention dialog is missing or has the wrong product title"
         }
         $controlRows = Get-MsiRows $database 'SELECT `Dialog_`, `Control`, `Type`, `Property`, `Text` FROM `Control`' 5
         foreach ($control in @("ComputeModeSelection", "ProbeStatus")) {
@@ -544,6 +606,13 @@ try {
             $computeModeControl[0].Columns[3] -cne "COMPUTE_MODE") {
             throw "Compute mode is not represented by a property-bound radio button group"
         }
+        $retentionControl = @($controlRows | Where-Object {
+            $_.Columns[0] -ceq "RemoveDataDlg" -and $_.Columns[1] -ceq "RetentionSelection"
+        })
+        if ($retentionControl.Count -ne 1 -or $retentionControl[0].Columns[2] -cne "RadioButtonGroup" -or
+            $retentionControl[0].Columns[3] -cne "REMOVE_RUNTIME_DATA") {
+            throw "Uninstall data-retention choice is not a property-bound radio button group"
+        }
         $radioButtonRows = Get-MsiRows $database 'SELECT `Property`, `Value`, `Text` FROM `RadioButton`' 3
         $computeModeRadioRows = @($radioButtonRows | Where-Object { $_.Columns[0] -ceq "COMPUTE_MODE" })
         if ($computeModeRadioRows.Count -ne 3) {
@@ -555,6 +624,19 @@ try {
             }).Count -ne 1) {
                 throw "Compute dialog does not expose radio choice: $mode"
             }
+        }
+        $retentionRadioRows = @($radioButtonRows | Where-Object { $_.Columns[0] -ceq "REMOVE_RUNTIME_DATA" })
+        if ($retentionRadioRows.Count -ne 2 -or
+            @($retentionRadioRows | Where-Object { $_.Columns[1] -ceq "0" }).Count -ne 1 -or
+            @($retentionRadioRows | Where-Object { $_.Columns[1] -ceq "1" }).Count -ne 1) {
+            throw "Uninstall data-retention dialog does not expose preserve and delete choices"
+        }
+        $controlEventRows = Get-MsiRows $database 'SELECT `Dialog_`, `Control_`, `Event`, `Argument` FROM `ControlEvent`' 4
+        if (@($controlEventRows | Where-Object {
+                $_.Columns[0] -ceq "MaintenanceTypeDlg" -and $_.Columns[1] -ceq "RemoveButton" -and
+                $_.Columns[2] -ceq "NewDialog" -and $_.Columns[3] -ceq "RemoveDataDlg"
+            }).Count -ne 1) {
+            throw "Uninstall flow does not route through the data-retention dialog"
         }
 
         $shortcutRows = Get-MsiRows $database 'SELECT `Shortcut`, `Directory_`, `Name`, `Component_`, `Target`, `Arguments` FROM `Shortcut`' 6
@@ -643,7 +725,8 @@ try {
             "Wix4SchedSecureObjects_X64", "Wix4SchedSecureObjectsRollback_X64",
             "Wix4ExecSecureObjects_X64", "Wix4ExecSecureObjectsRollback_X64",
             "DetectComputeHardware", "BlockUnavailableCuda",
-            "RestoreLegacyComputeMode", "RestoreNexoAIComputeMode"
+            "RestoreLegacyComputeMode", "RestoreNexoAIComputeMode",
+            "SetPurgeRuntimeData", "PurgeRuntimeData"
         )
         # On-target engine build is optional: present only when the MSI ships the
         # engine-builder payload (HasEngineBuilder=1). Its SetProperty (type 51) and
@@ -665,6 +748,13 @@ try {
         if ($probeAction.Count -ne 1 -or $probeAction[0].Columns[2] -cne "HardwareProbeCA" -or
             $probeAction[0].Columns[3] -cne "DetectComputeHardware") {
             throw "Hardware probe custom action does not reference the approved embedded DLL/export"
+        }
+        $purgeAction = @($customActionRows | Where-Object { $_.Columns[0] -ceq "PurgeRuntimeData" })
+        $setPurgeAction = @($customActionRows | Where-Object { $_.Columns[0] -ceq "SetPurgeRuntimeData" })
+        if ($purgeAction.Count -ne 1 -or $setPurgeAction.Count -ne 1 -or
+            $purgeAction[0].Columns[2] -cne "Wix4UtilCA_X64" -or
+            $purgeAction[0].Columns[3] -cne "WixQuietExec64") {
+            throw "Runtime-data deletion does not use the approved deferred WiX execution action"
         }
         $binaryRows = Get-MsiRows $database 'SELECT `Name` FROM `Binary`' 1
         if (@($binaryRows | Where-Object { $_.Columns[0] -ceq "HardwareProbeCA" }).Count -ne 1) {

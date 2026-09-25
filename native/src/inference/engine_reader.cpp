@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/engine_reader.hpp"
-#include "cuajone/resource_limits.hpp"
+#include "nexoai/engine_reader.hpp"
+#include "nexoai/resource_limits.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -13,7 +13,7 @@
 #include <string_view>
 #include <variant>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 constexpr std::uint32_t kMaximumMetadataBytes = 16U * 1024U * 1024U;
@@ -441,4 +441,4 @@ bool EngineFile::hasMetadataPrefix() const noexcept {
     return has_metadata_prefix_;
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

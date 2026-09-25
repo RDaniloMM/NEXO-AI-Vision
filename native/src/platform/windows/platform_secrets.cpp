@@ -9,7 +9,7 @@
 #include <cstring>
 #include <vector>
 
-namespace cuajone::platform {
+namespace nexoai::platform {
 namespace {
 
 std::wstring target(std::wstring_view profile_name) {
@@ -56,4 +56,4 @@ void deleteCameraPassword(std::wstring_view profile_name) noexcept {
     CredDeleteW(name.c_str(), CRED_TYPE_GENERIC, 0);
 }
 
-}  // namespace cuajone::platform
+}  // namespace nexoai::platform

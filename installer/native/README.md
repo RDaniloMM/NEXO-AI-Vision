@@ -7,6 +7,14 @@ Para el piloto operativo usa primero el
 [runbook breve Para TI](../../PARA_TI_WINDOWS.md). La persona usuaria debe seguir
 la [guía simple de instalación](../../INSTALACION_WINDOWS.md).
 
+## Icono del producto
+
+La unica fuente del icono es [`assets/icon.ico`](assets/icon.ico). Para cambiar la
+marca, reemplaza ese unico archivo ICO y recompila: CMake lo incorpora al visor
+Qt6 y al iniciador, el empaquetador lo incorpora al MSI y el paquete Linux instala
+la misma fuente. No se deben agregar copias ni variantes del icono en otros
+directorios.
+
 ## Secuencia recomendada
 
 1. Confirma el alcance y la autorización de seguridad.
@@ -30,7 +38,7 @@ También falla cerrado si staging o extracción contienen Python, `.py`, `.pyc`,
 JSONL, recibos de paridad o modelos/engines fuera de la política explícita del
 instalador. Esa política permite únicamente el bundle ONNX aprobado y, cuando se
 configuran expresamente, los engines TensorRT aprobados en las rutas de modelos
-permitidas; cualquier otro modelo o engine se rechaza. El binding y `cuajone_qa`
+permitidas; cualquier otro modelo o engine se rechaza. El binding y `nexoai_qa`
 son solo de desarrollo/QA.
 
 El instalador no fija el producto a una cámara. La configuración ocurre después y
@@ -75,8 +83,8 @@ Installer.
 ```powershell
 .\installer\native\Install-Pilot.ps1 `
   -MsiPath "D:\Paquete\NexoAIVision-0.1.0-internal.23-x64-Internal.msi" `
-  -RootCertificatePath "D:\Paquete\Cuajone-PPE-Monitor-Internal-Pilot-Root-CA-2026.cer" `
-  -LeafCertificatePath "D:\Paquete\Cuajone-PPE-Monitor-Internal-Pilot-Code-Signing-2026.cer" `
+  -RootCertificatePath "D:\Paquete\NexoAI-PPE-Monitor-Internal-Pilot-Root-CA-2026.cer" `
+  -LeafCertificatePath "D:\Paquete\NexoAI-PPE-Monitor-Internal-Pilot-Code-Signing-2026.cer" `
   -ExpectedMsiSha256 "<SHA256_MSI>" `
   -ExpectedRootCertificateSha256 "<SHA256_CER_RAIZ>" `
   -ExpectedLeafCertificateSha256 "<SHA256_CER_HOJA>" `
@@ -84,7 +92,7 @@ Installer.
   -ExpectedLeafThumbprint "<HUELLA_SHA1_HOJA>" `
   -InstallFolder "D:\Apps\NexoAI Vision" `
   -ComputeMode auto `
-  -LogPath "D:\Logs\cuajone-install.log" `
+  -LogPath "D:\Logs\nexoai-install.log" `
   -AuthorizeTrustEnrollment
 ```
 
@@ -123,8 +131,8 @@ carpetas. Los binarios conservan los permisos endurecidos heredados de
 `Program Files`. La instalación crea el acceso principal **NexoAI Vision**
 para el iniciador y conserva **Command Help** y **README** en el menú Inicio.
 
-Al actualizar desde Cuajone PPE Monitor, el MSI no mueve ni elimina
-`C:\ProgramData\Cuajone PPE Monitor`. NexoAI Vision escribe los datos nuevos en su
+Al actualizar desde NexoAI PPE Monitor, el MSI no mueve ni elimina
+`C:\ProgramData\NexoAI PPE Monitor`. NexoAI Vision escribe los datos nuevos en su
 propia carpeta; el iniciador no carga modelos desde la ruta heredada.
 El valor `ComputeMode` se busca primero en `HKLM\SOFTWARE\NexoAI Vision` y después
 en la clave heredada; una instalación nueva escribe solo la clave NexoAI Vision.
@@ -151,7 +159,7 @@ aprobado, `INSTALLFOLDER` puede dirigirse a otra ruta:
 
 ```powershell
 $msi = "D:\Paquetes\NexoAIVision-0.1.0-internal.23-x64-Internal.msi"
-$log = "D:\Logs\cuajone-install.log"
+$log = "D:\Logs\nexoai-install.log"
 
 msiexec.exe /i $msi /qn /norestart `
   INSTALLFOLDER="D:\Apps\NexoAI Vision" `
@@ -214,12 +222,12 @@ firmado, configura la hoja piloto no exportable existente y ejecuta:
 
 ```powershell
 $certs = .\installer\native\New-InternalPilotSigningCertificates.ps1
-$env:CUAJONE_CERTIFICATE_SHA1 = $certs.LeafThumbprint
-$env:CUAJONE_PILOT_ROOT_CER = $certs.RootPublicCertificate
-$env:CUAJONE_ALLOW_INTERNAL_PILOT_TRUST = "1"
-$env:CUAJONE_SIGNTOOL_PATH = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
-$env:CUAJONE_TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
-$env:CUAJONE_SIGN_COMMAND = (Resolve-Path .\installer\native\sign-release.ps1).Path
+$env:NEXOAI_CERTIFICATE_SHA1 = $certs.LeafThumbprint
+$env:NEXOAI_PILOT_ROOT_CER = $certs.RootPublicCertificate
+$env:NEXOAI_ALLOW_INTERNAL_PILOT_TRUST = "1"
+$env:NEXOAI_SIGNTOOL_PATH = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
+$env:NEXOAI_TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
+$env:NEXOAI_SIGN_COMMAND = (Resolve-Path .\installer\native\sign-release.ps1).Path
 
 .\installer\native\build-installer.ps1 `
   -BuildMode Preview `
@@ -260,14 +268,14 @@ estrictamente, `MajorUpgrade` reemplaza la versión anterior.
 
 Antes de empaquetar, el script verifica que el PE de
 `NexoAIVisionLauncher.exe` ya trae el `FileVersion` resuelto (mismo gate que
-`version-policy.ps1`, que pide `-DCUAJONE_FILE_VERSION=<nuevo>` + rebuild).
+`version-policy.ps1`, que pide `-DNEXOAI_FILE_VERSION=<nuevo>` + rebuild).
 Con `-AutoRebuildLauncher` ejecuta ese `cmake -S native -B <buildDir>
--DCUAJONE_FILE_VERSION=... -DCUAJONE_PRODUCT_VERSION=...` y
-`cmake --build <buildDir> --target cuajone_launcher` por vos.
+-DNEXOAI_FILE_VERSION=... -DNEXOAI_PRODUCT_VERSION=...` y
+`cmake --build <buildDir> --target nexoai_qt_launcher` por vos.
 
 El candidato local usa `0.1.0-internal.36`, no está publicado ni autorizado para
 instalación; `v0.1.0-internal.24` y sus assets publicados son inmutables. Un build `Release` exige además
-`CUAJONE_PARITY_RECEIPT` con contrato `1.0.0`, commit exacto y paridad completa
+`NEXOAI_PARITY_RECEIPT` con contrato `1.0.0`, commit exacto y paridad completa
 sobre engines/video autorizados. El recibo debe cumplir el esquema compartido,
 identificar y hashear al menos dos inputs aprobados, aportar evidencia hash y
 comparaciones positivas para las seis etapas, y referenciar la autorización. Su
@@ -276,7 +284,7 @@ recibo vence después de siete días. Un recibo sintético no atraviesa ese gate
 
 El MSI, su `.sha256`, staging, SBOM SPDX 2.3, temporales y evidencia quedan bajo
 `.tools\native\installer`. El script firma primero
-`NexoAIVision.exe`, `NexoAIVisionLauncher.exe` y `CuajoneHardwareProbeCA.dll`,
+`NexoAIVision.exe`, `NexoAIVisionLauncher.exe` y `NexoAIHardwareProbeCA.dll`,
 construye/firma el MSI y realiza extracción administrativa en D. Ambos ejecutables
 son raíces independientes del recorrido de imports PE. Nunca vuelve a firmar DLL
 de terceros.
@@ -329,11 +337,11 @@ QA que reutiliza `installer\stage\bin`.
 ## 8. Controlar la firma
 
 `sign-release.ps1` acepta únicamente `NexoAIVisionLauncher.exe`,
-`NexoAIVision.exe`, `CuajoneHardwareProbeCA.dll` y archivos `.msi`. Usa SignTool
+`NexoAIVision.exe`, `NexoAIHardwareProbeCA.dll` y archivos `.msi`. Usa SignTool
 con digest SHA-256, timestamp RFC 3161 y verificación Authenticode. No acepta PFX,
 contraseñas ni claves exportadas.
 
-El opt-in `CUAJONE_ALLOW_INTERNAL_PILOT_TRUST=1` solo funciona con
+El opt-in `NEXOAI_ALLOW_INTERNAL_PILOT_TRUST=1` solo funciona con
 `-BuildMode Preview`. La verificación admite únicamente `UntrustedRoot` en una
 máquina todavía no enrolada y prueba además la cadena contra el CER raíz público
 indicado. `Release` nunca acepta esa ruta: exige confianza pública, worktree
@@ -358,7 +366,7 @@ repositorio no acepta términos legales ni presupone elegibilidad: se fija WiX
 6.0.2 hasta que el responsable confirme por escrito el cumplimiento OSMF o apruebe
 una compilación propia de WiX 7.
 
-`CuajonePpeMonitor.wixproj` registra las dependencias; `build-installer.ps1` usa
+`NexoAIVision.wixproj` registra las dependencias; `build-installer.ps1` usa
 el CLI local fijado. `Package.wxs` define identidad, `UpgradeCode`, UI, carpetas,
 ACL y accesos. El script genera `Payload.wxs` en D con un componente y GUID
 determinista por ruta staged; ese archivo no se versiona.
@@ -379,8 +387,8 @@ después de instalar el .NET SDK ejecútalo directamente con:
 El script instala exactamente WiX 6.0.2 bajo `.tools\native\wix`, añade las
 extensiones `WixToolset.UI.wixext` y `WixToolset.Util.wixext` en la misma cache
 local y verifica sus versiones. Para el runtime nativo, desde `native/` ejecuta
-también `Provision-TrackingDependencies.ps1` y `Provision-Resvg.ps1`; ambos
-descargan fuentes o herramientas fijadas y verifican SHA-256. Visual Studio,
+también `Provision-TrackingDependencies.ps1`; este descarga fuentes fijadas y
+verifica SHA-256. Visual Studio,
 CMake, Ninja, OpenCV, CUDA y TensorRT siguen siendo prerrequisitos externos:
 deben instalarse u obtenerse mediante sus canales autorizados antes de activar el
 toolchain con `activate-native.ps1`.

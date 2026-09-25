@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace cuajone::platform {
+namespace nexoai::platform {
 
 struct SecretStoreInfo {
     bool persistent{};
@@ -22,4 +22,4 @@ namespace detail {
 bool validSecretProfileName(std::wstring_view profile_name) noexcept;
 }
 
-}  // namespace cuajone::platform
+}  // namespace nexoai::platform

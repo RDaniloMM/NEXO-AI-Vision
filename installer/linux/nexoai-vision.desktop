@@ -4,6 +4,6 @@ Name=Nexo AI Vision
 Comment=PPE and safety analytics
 Exec=/opt/nexoai-vision/bin/NexoAIVisionLauncher
 TryExec=/opt/nexoai-vision/bin/NexoAIVisionLauncher
-Icon=nexoai-vision
+Icon=/usr/share/pixmaps/nexoai-vision.ico
 Terminal=false
 Categories=Video;Graphics;Utility;

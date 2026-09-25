@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-#include "cuajone/launcher_version.hpp"
+#include "nexoai/launcher_version.hpp"
 
 #include <windows.h>
 #include <winver.h>
@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace cuajone::launcher {
+namespace nexoai::launcher {
 std::optional<std::wstring> executableFileVersion(const std::filesystem::path& path) {
     DWORD ignored{};
     const DWORD size = GetFileVersionInfoSizeW(path.c_str(), &ignored);
@@ -69,4 +69,4 @@ std::optional<std::wstring> runningLauncherVersion() {
     path.resize(length);
     return executableFileVersion(path);
 }
-}  // namespace cuajone::launcher
+}  // namespace nexoai::launcher

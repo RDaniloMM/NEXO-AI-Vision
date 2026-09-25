@@ -41,7 +41,7 @@ tool_root="${project_root}/.tools/native"
 download_root="${tool_root}/downloads"
 dependency_root="${tool_root}/dependencies"
 ort_root="${tool_root}/linux-onnxruntime-${ONNX_RUNTIME_VERSION}"
-patch_path="${project_root}/native/third_party/byte-track-eigen-cuajone.patch"
+patch_path="${project_root}/native/third_party/byte-track-eigen-nexoai.patch"
 
 for command_name in curl sha256sum unzip tar git; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -79,7 +79,7 @@ fetch_verified() {
 
 provision_tracking_dependency() {
     local archive="$1" target="$2" expected_root="$3" marker="$4" apply_patch="$5"
-    local receipt="${target}/.cuajone-source-receipt.json"
+    local receipt="${target}/.nexoai-source-receipt.json"
     local archive_sha256
     archive_sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
 
@@ -109,7 +109,7 @@ provision_tracking_dependency() {
     fi
     mv -- "$expanded" "$target"
     printf '{"archive_sha256":"%s","patch_sha256":"%s"}' \
-        "$archive_sha256" "$patch_sha256" > "${target}/.cuajone-source-receipt.json"
+        "$archive_sha256" "$patch_sha256" > "${target}/.nexoai-source-receipt.json"
 }
 
 byte_track_archive="${download_root}/byte-track-eigen-${BYTE_TRACK_COMMIT}.zip"

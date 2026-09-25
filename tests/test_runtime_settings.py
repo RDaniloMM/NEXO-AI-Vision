@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cuajone_qa.runtime import RuntimeSettings, RuntimeState
+from nexoai_qa.runtime import RuntimeSettings, RuntimeState
 
 
 def test_runtime_settings_defaults_and_overrides_are_isolated(tmp_path: Path) -> None:

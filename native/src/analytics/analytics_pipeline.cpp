@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/analytics_pipeline.hpp"
+#include "nexoai/analytics_pipeline.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <stdexcept>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 bool contains(std::span<const int> ids, int class_id) {
@@ -147,10 +147,10 @@ ProcessedFrame AnalyticsPipeline::process(const ObservationFrame& frame) {
                 + "-" + std::to_string(event_index++);
             canonical.events.push_back({
                 id,
-                "urn:cuajone:camera:" + safeUrnPart(frame.source_id),
+                "urn:nexoai:camera:" + safeUrnPart(frame.source_id),
                 event.event_type == "INCUMPLIMIENTO_EPP"
-                    ? "com.cuajone.safety.ppe.violation.v2"
-                    : "com.cuajone.safety.fall.possible.v2",
+                    ? "com.nexoai.safety.ppe.violation.v2"
+                    : "com.nexoai.safety.fall.possible.v2",
                 frame.observed_at,
                 "track/" + std::to_string(event.track_id),
                 frame.frame_id,
@@ -192,4 +192,4 @@ std::string_view AnalyticsPipeline::runtimeVersion() const noexcept {
     return kRuntimeVersion;
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

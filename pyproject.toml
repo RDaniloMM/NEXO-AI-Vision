@@ -1,5 +1,5 @@
 [project]
-name = "camaras-ip-cuajone"
+name = "nexoai-vision"
 version = "0.1.0"
 description = "RTSP safety analytics for PPE compliance and optional fall detection"
 readme = "README.md"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-cuajone-qa = "cuajone_qa.cli:main"
+nexoai-qa = "nexoai_qa.cli:main"
 
 [project.optional-dependencies]
 experimental = [
@@ -46,7 +46,7 @@ requires = ["setuptools==80.9.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["cuajone_qa*"]
+include = ["nexoai_qa*"]
 
 [tool.uv]
 package = true

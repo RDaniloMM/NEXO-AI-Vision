@@ -17,7 +17,7 @@
 #include <cmath>
 #include <utility>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -29,9 +29,9 @@ constexpr int kDisplayCanvasHeight = 720;
 
 QRectF canvasRectForSize(const QSize& size, int canvas_width, int canvas_height) {
     if (size.isEmpty() || canvas_width <= 0 || canvas_height <= 0) return {};
-    const double scale = std::min({1.0,
+    const double scale = std::min(
         static_cast<double>(size.width()) / static_cast<double>(canvas_width),
-        static_cast<double>(size.height()) / static_cast<double>(canvas_height)});
+        static_cast<double>(size.height()) / static_cast<double>(canvas_height));
     const QSizeF fitted(canvas_width * scale, canvas_height * scale);
     return QRectF(
         (size.width() - fitted.width()) / 2.0,
@@ -264,7 +264,9 @@ QtMosaicViewer::QtMosaicViewer(
     widget_ = std::make_unique<MosaicWidget>(state_, quit_requested_);
     widget_->setWindowTitle(QString::fromUtf8(title.data(), static_cast<int>(title.size())));
     widget_->resize(kDisplayCanvasWidth, kDisplayCanvasHeight);
-    widget_->show();
+    // This is the annotated inference surface, not the launcher. Start it in
+    // full-screen mode as soon as a capture begins.
+    widget_->showFullScreen();
     widget_->setFocus();
 }
 
@@ -287,4 +289,4 @@ bool QtMosaicViewer::processEvents() {
     return quit_requested_ || !widget_->isVisible();
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

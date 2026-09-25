@@ -49,7 +49,7 @@ try {
     Assert-NoForbiddenPayloadFiles $TestRoot "policy test"
     $forbiddenPaths = @(
         "bin\unexpected_tool.exe",
-        "cuajone_native.pyd",
+        "nexoai_native.pyd",
         "python312.dll",
         "python311.dll",
         "python313_d.dll",

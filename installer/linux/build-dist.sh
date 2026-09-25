@@ -8,10 +8,9 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage: build-dist.sh [--build-dir DIR] [--output-dir DIR] [--version X.Y.Z]
-                      [--with-qt] [--with-tensorrt]
+                      [--with-tensorrt]
 
-The package build enables the Qt6 launcher and viewer by default. Use a direct
-CMake configure with both Qt options OFF for the development HighGUI fallback.
+The package always uses the Qt6 launcher and inference viewer.
 TensorRT is opt-in and requires TENSORRT_ROOT (default: /opt/tensorrt) and a
 host CUDA toolkit (default: /usr/local/cuda). Engines are never built or bundled.
 EOF
@@ -25,7 +24,6 @@ chmod +x "${script_dir}/run.sh" "${script_dir}/postinst"
 build_dir="${project_root}/.tools/native/build/linux-package"
 output_dir="${project_root}/.tools/native/dist"
 version="0.1.0"
-with_qt=1
 with_tensorrt=0
 
 while [[ $# -gt 0 ]]; do
@@ -33,7 +31,6 @@ while [[ $# -gt 0 ]]; do
         --build-dir) [[ $# -ge 2 ]] || { echo "Missing value for --build-dir" >&2; exit 2; }; build_dir="$2"; shift 2 ;;
         --output-dir) [[ $# -ge 2 ]] || { echo "Missing value for --output-dir" >&2; exit 2; }; output_dir="$2"; shift 2 ;;
         --version) [[ $# -ge 2 ]] || { echo "Missing value for --version" >&2; exit 2; }; version="$2"; shift 2 ;;
-        --with-qt) with_qt=1; shift ;;
         --with-tensorrt) with_tensorrt=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -45,19 +42,19 @@ if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; th
     exit 2
 fi
 
-if [[ -n "${CUAJONE_CMAKE_BIN:-}" ]]; then
-    if [[ -x "${CUAJONE_CMAKE_BIN}/cmake" ]]; then
-        cmake_bin="${CUAJONE_CMAKE_BIN}/cmake"
-    elif [[ -x "${CUAJONE_CMAKE_BIN}" ]]; then
-        cmake_bin="${CUAJONE_CMAKE_BIN}"
+if [[ -n "${NEXOAI_CMAKE_BIN:-}" ]]; then
+    if [[ -x "${NEXOAI_CMAKE_BIN}/cmake" ]]; then
+        cmake_bin="${NEXOAI_CMAKE_BIN}/cmake"
+    elif [[ -x "${NEXOAI_CMAKE_BIN}" ]]; then
+        cmake_bin="${NEXOAI_CMAKE_BIN}"
     else
-        echo "CUAJONE_CMAKE_BIN does not point to cmake or its directory: ${CUAJONE_CMAKE_BIN}" >&2
+        echo "NEXOAI_CMAKE_BIN does not point to cmake or its directory: ${NEXOAI_CMAKE_BIN}" >&2
         exit 1
     fi
 elif command -v cmake >/dev/null 2>&1; then
     cmake_bin="$(command -v cmake)"
 else
-    echo "cmake not found; install it or set CUAJONE_CMAKE_BIN" >&2
+    echo "cmake not found; install it or set NEXOAI_CMAKE_BIN" >&2
     exit 1
 fi
 
@@ -81,26 +78,20 @@ install_stage="${build_dir}/install-stage"
 rm -rf "$install_stage"
 mkdir -p "$install_stage"
 
-qt_args=(-DCUAJONE_BUILD_QT_LAUNCHER=OFF -DCUAJONE_BUILD_QT_VIEWER=OFF -DCUAJONE_USE_QT=OFF -DCUAJONE_REQUIRE_QT=OFF)
-if [[ "$with_qt" -eq 1 ]]; then
-    qt_args=(-DCUAJONE_BUILD_QT_LAUNCHER=ON -DCUAJONE_BUILD_QT_VIEWER=ON -DCUAJONE_USE_QT=ON -DCUAJONE_REQUIRE_QT=ON)
-fi
-
-trt_args=(-DCUAJONE_ENABLE_TENSORRT=OFF -DTENSORRT_ROOT=)
+trt_args=(-DNEXOAI_ENABLE_TENSORRT=OFF -DTENSORRT_ROOT=)
 if [[ "$with_tensorrt" -eq 1 ]]; then
-    trt_args=(-DCUAJONE_ENABLE_TENSORRT=ON "-DTENSORRT_ROOT=${trt_root}" "-DCUDAToolkit_ROOT=${cuda_root}")
+    trt_args=(-DNEXOAI_ENABLE_TENSORRT=ON "-DTENSORRT_ROOT=${trt_root}" "-DCUDAToolkit_ROOT=${cuda_root}")
 fi
 
 "$cmake_bin" -S "${project_root}/native" -B "$build_dir" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCUAJONE_BUILD_RUNTIME=ON \
-    -DCUAJONE_BUILD_TESTS=OFF \
-    -DCUAJONE_BUILD_LAUNCHER=OFF \
-    "-DCUAJONE_FILE_VERSION=${version}.0" \
-    "-DCUAJONE_PRODUCT_VERSION=${version}" \
-    "-DCUAJONE_PACKAGE_VERSION=${version}" \
+    -DNEXOAI_BUILD_RUNTIME=ON \
+    -DNEXOAI_BUILD_TESTS=OFF \
+    "-DNEXOAI_FILE_VERSION=${version}.0" \
+    "-DNEXOAI_PRODUCT_VERSION=${version}" \
+    "-DNEXOAI_PACKAGE_VERSION=${version}" \
     "-DONNXRUNTIME_ROOT=${onnxruntime_root}" \
-    "${qt_args[@]}" "${trt_args[@]}"
+    "${trt_args[@]}"
 "$cmake_bin" --build "$build_dir" --parallel
 "$cmake_bin" --install "$build_dir" --prefix "$install_stage" --config Release
 

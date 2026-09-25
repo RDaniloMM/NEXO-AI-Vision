@@ -12,7 +12,7 @@ from typing import Any
 
 from ultralytics import YOLO
 
-from cuajone_qa.ppe import validate_ppe_labels
+from nexoai_qa.ppe import validate_ppe_labels
 
 
 MANIFEST_VERSION = 3
@@ -227,7 +227,7 @@ def export_one(source: Path, target: Path, role: str, task: str, *, end2end: boo
             "maximum_image_size": 1280,
         },
         "provenance": {
-            "source_uri": f"urn:cuajone:model:{role}:ultralytics-yolo26",
+            "source_uri": f"urn:nexoai:model:{role}:ultralytics-yolo26",
             "exporter": "Ultralytics YOLO ONNX export",
             "license": "AGPL-3.0-only",
             "source_checkpoint": source_checkpoint,

@@ -16,30 +16,30 @@
 # POSIX runtime CPU-only: no CUDA/TensorRT until Fase 3.)
 
 if [ -n "${BASH_SOURCE:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then
-    _CUAJONE_SOURCED=1
+    _NEXOAI_SOURCED=1
 else
     echo "This script must be sourced: source native/activate-native.sh" >&2
     exit 1
 fi
 
-_CUAJONE_CPU_ONLY=0
-for _cuajone_arg in "$@"; do
-    case "${_cuajone_arg}" in
-        --cpu-only) _CUAJONE_CPU_ONLY=1 ;;
-        *) echo "activate-native.sh: unknown argument '${_cuajone_arg}'" >&2; return 1 ;;
+_NEXOAI_CPU_ONLY=0
+for _nexoai_arg in "$@"; do
+    case "${_nexoai_arg}" in
+        --cpu-only) _NEXOAI_CPU_ONLY=1 ;;
+        *) echo "activate-native.sh: unknown argument '${_nexoai_arg}'" >&2; return 1 ;;
     esac
 done
 
-_CUAJONE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_CUAJONE_PROJECT_ROOT="$(dirname "${_CUAJONE_SCRIPT_DIR}")"
-_CUAJONE_TOOL_ROOT="${_CUAJONE_PROJECT_ROOT}/.tools/native"
+_NEXOAI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_NEXOAI_PROJECT_ROOT="$(dirname "${_NEXOAI_SCRIPT_DIR}")"
+_NEXOAI_TOOL_ROOT="${_NEXOAI_PROJECT_ROOT}/.tools/native"
 # shellcheck disable=SC1091
-source "${_CUAJONE_PROJECT_ROOT}/installer/linux/dependency-lock.env"
+source "${_NEXOAI_PROJECT_ROOT}/installer/linux/dependency-lock.env"
 
 # --- Toolchain locations (override by exporting before sourcing) ---
 # ONNX Runtime: Linux 1.25.0 package (Fase 1 runtime); provision it with the
 # 'Provision ONNX Runtime' step of .github/workflows/linux-build.yml.
-: "${ONNXRUNTIME_ROOT:=${_CUAJONE_TOOL_ROOT}/linux-onnxruntime-${ONNX_RUNTIME_VERSION}}"
+: "${ONNXRUNTIME_ROOT:=${_NEXOAI_TOOL_ROOT}/linux-onnxruntime-${ONNX_RUNTIME_VERSION}}"
 # OpenCV: empty means CMake system search, which finds apt libopencv-dev
 # (/usr/lib/x86_64-linux-gnu/cmake/opencv4). Point at a custom build if needed.
 : "${OpenCV_DIR:=}"
@@ -49,21 +49,21 @@ source "${_CUAJONE_PROJECT_ROOT}/installer/linux/dependency-lock.env"
 export ONNXRUNTIME_ROOT OpenCV_DIR TENSORRT_ROOT CUDA_ROOT
 
 # --- cmake / ninja on PATH ---
-if [ -z "${CUAJONE_CMAKE_BIN:-}" ]; then
+if [ -z "${NEXOAI_CMAKE_BIN:-}" ]; then
     if command -v cmake >/dev/null 2>&1; then
-        CUAJONE_CMAKE_BIN="$(dirname "$(command -v cmake)")"
+        NEXOAI_CMAKE_BIN="$(dirname "$(command -v cmake)")"
     else
-        echo "activate-native.sh: cmake not found. Install it (sudo apt install cmake) or set CUAJONE_CMAKE_BIN." >&2
+        echo "activate-native.sh: cmake not found. Install it (sudo apt install cmake) or set NEXOAI_CMAKE_BIN." >&2
         return 1
     fi
 fi
-export CUAJONE_CMAKE_BIN
+export NEXOAI_CMAKE_BIN
 case ":${PATH}:" in
-    *":${CUAJONE_CMAKE_BIN}:"*) ;;
-    *) export PATH="${CUAJONE_CMAKE_BIN}:${PATH}" ;;
+    *":${NEXOAI_CMAKE_BIN}:"*) ;;
+    *) export PATH="${NEXOAI_CMAKE_BIN}:${PATH}" ;;
 esac
 
-if [ "${_CUAJONE_CPU_ONLY}" -eq 1 ]; then
+if [ "${_NEXOAI_CPU_ONLY}" -eq 1 ]; then
     unset TENSORRT_ROOT CUDA_ROOT
 fi
 
@@ -82,16 +82,16 @@ if [ ! -f "${ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h" ]; then
     echo "activate-native.sh: warning: Linux ONNX Runtime 1.25.0 not found under ${ONNXRUNTIME_ROOT}" >&2
     echo "  Replicate the 'Provision ONNX Runtime' step of .github/workflows/linux-build.yml" >&2
 fi
-if [ ! -f "${_CUAJONE_TOOL_ROOT}/dependencies/byte-track-eigen-${BYTE_TRACK_COMMIT}/.cuajone-source-receipt.json" ]; then
+if [ ! -f "${_NEXOAI_TOOL_ROOT}/dependencies/byte-track-eigen-${BYTE_TRACK_COMMIT}/.nexoai-source-receipt.json" ]; then
     echo "activate-native.sh: warning: pinned ByteTrack/Eigen sources are missing under .tools/native/dependencies" >&2
     echo "  Replicate the 'Provision tracking dependencies' step of .github/workflows/linux-build.yml" >&2
 fi
 unset -f _cuaje_warn_missing
 
-echo "Nexo AI Vision Linux native environment activated from ${_CUAJONE_TOOL_ROOT} (CPU only: ${_CUAJONE_CPU_ONLY})"
+echo "Nexo AI Vision Linux native environment activated from ${_NEXOAI_TOOL_ROOT} (CPU only: ${_NEXOAI_CPU_ONLY})"
 echo "  ONNXRUNTIME_ROOT=${ONNXRUNTIME_ROOT} (Fase 1)"
 echo "  OpenCV_DIR=${OpenCV_DIR:-<system search>}"
 echo "  TENSORRT_ROOT=${TENSORRT_ROOT:-<unset>} (Fase 3)"
 echo "  CUDA_ROOT=${CUDA_ROOT:-<unset>} (Fase 3)"
-echo "  CUAJONE_CMAKE_BIN=${CUAJONE_CMAKE_BIN}"
-unset _CUAJONE_CPU_ONLY _CUAJONE_SCRIPT_DIR _CUAJONE_PROJECT_ROOT _CUAJONE_TOOL_ROOT _cuajone_arg
+echo "  NEXOAI_CMAKE_BIN=${NEXOAI_CMAKE_BIN}"
+unset _NEXOAI_CPU_ONLY _NEXOAI_SCRIPT_DIR _NEXOAI_PROJECT_ROOT _NEXOAI_TOOL_ROOT _nexoai_arg

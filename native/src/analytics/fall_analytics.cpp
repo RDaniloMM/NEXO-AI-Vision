@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/fall_analytics.hpp"
+#include "nexoai/fall_analytics.hpp"
 
-#include "cuajone/ppe_analytics.hpp"
+#include "nexoai/ppe_analytics.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 float keypointThreshold(float pose_confidence) noexcept {
@@ -175,4 +175,4 @@ void FallAnalyzer::reset() noexcept {
     states_.clear();
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

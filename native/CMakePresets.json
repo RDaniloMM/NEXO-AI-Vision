@@ -23,17 +23,16 @@
     },
     {
       "name": "linux-release",
-      "displayName": "Linux runtime CLI + tests (Fase 1: POSIX runtime, no launcher)",
+      "displayName": "Linux runtime with the Qt6 launcher and inference viewer",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/../.tools/native/build/presets/linux-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "CUAJONE_BUILD_RUNTIME": "ON",
-        "CUAJONE_BUILD_TESTS": "ON",
-        "CUAJONE_BUILD_LAUNCHER": "OFF",
-        "CUAJONE_ENABLE_TENSORRT": "OFF",
+        "NEXOAI_BUILD_RUNTIME": "ON",
+        "NEXOAI_BUILD_TESTS": "ON",
+        "NEXOAI_ENABLE_TENSORRT": "OFF",
         "ONNXRUNTIME_ROOT": "$env{ONNXRUNTIME_ROOT}",
         "OpenCV_DIR": "",
         "TENSORRT_ROOT": ""
@@ -45,9 +44,9 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/../.tools/native/build/presets/cpu-tests",
       "cacheVariables": {
-        "CUAJONE_BUILD_RUNTIME": "ON",
-        "CUAJONE_ENABLE_TENSORRT": "OFF",
-        "CUAJONE_BUILD_TESTS": "ON",
+        "NEXOAI_BUILD_RUNTIME": "ON",
+        "NEXOAI_ENABLE_TENSORRT": "OFF",
+        "NEXOAI_BUILD_TESTS": "ON",
         "CMAKE_BUILD_TYPE": "Release",
         "ONNXRUNTIME_ROOT": "$env{ONNXRUNTIME_ROOT}",
         "OpenCV_DIR": "$env{OpenCV_DIR}"
@@ -60,12 +59,12 @@
       "binaryDir": "${sourceDir}/../.tools/native/build/presets/python-bindings",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CUAJONE_BUILD_RUNTIME": "ON",
-        "CUAJONE_BUILD_TESTS": "ON",
-        "CUAJONE_BUILD_PYTHON_BINDINGS": "ON",
-        "CUAJONE_PYBIND11_ROOT": "$env{CUAJONE_PYBIND11_ROOT}",
-        "CUAJONE_PYTHON_OUTPUT_DIR": "${sourceDir}/../.tools/native/build/presets/python-bindings/python",
-        "Python_EXECUTABLE": "$env{CUAJONE_PYTHON_EXECUTABLE}",
+        "NEXOAI_BUILD_RUNTIME": "ON",
+        "NEXOAI_BUILD_TESTS": "ON",
+        "NEXOAI_BUILD_PYTHON_BINDINGS": "ON",
+        "NEXOAI_PYBIND11_ROOT": "$env{NEXOAI_PYBIND11_ROOT}",
+        "NEXOAI_PYTHON_OUTPUT_DIR": "${sourceDir}/../.tools/native/build/presets/python-bindings/python",
+        "Python_EXECUTABLE": "$env{NEXOAI_PYTHON_EXECUTABLE}",
         "TENSORRT_ROOT": "$env{TENSORRT_ROOT}",
         "ONNXRUNTIME_ROOT": "$env{ONNXRUNTIME_ROOT}",
         "CUDA_RUNTIME_ROOT": "$env{CUDA_RUNTIME_ROOT}",
@@ -80,14 +79,14 @@
       "inherits": "windows-msvc",
       "binaryDir": "${sourceDir}/../.tools/native/build/presets/gpu-onnx-integration",
       "cacheVariables": {
-        "CUAJONE_BUILD_TESTS": "ON",
-        "CUAJONE_ENABLE_TENSORRT": "OFF",
-        "CUAJONE_ENABLE_ONNX_CUDA_INTEGRATION_TESTS": "ON",
-        "CUAJONE_ENABLE_INTERNAL_DIAGNOSTICS": "ON",
+        "NEXOAI_BUILD_TESTS": "ON",
+        "NEXOAI_ENABLE_TENSORRT": "OFF",
+        "NEXOAI_ENABLE_ONNX_CUDA_INTEGRATION_TESTS": "ON",
+        "NEXOAI_ENABLE_INTERNAL_DIAGNOSTICS": "ON",
         "ONNXRUNTIME_ROOT": "${sourceDir}/../.tools/native/onnxruntime-win-x64-gpu-1.25.0",
-        "CUAJONE_ONNX_CUDA_DEPENDENCY_ROOTS": "${sourceDir}/../.tools/native/onnxruntime-win-x64-gpu-1.25.0/lib;${sourceDir}/../.tools/native/cuda-runtime/nvidia/cuda_runtime/bin;${sourceDir}/../.tools/native/nvidia-libraries/cublas/nvidia/cublas/bin;${sourceDir}/../.tools/native/nvidia-libraries/cudnn/nvidia/cudnn/bin;${sourceDir}/../.tools/native/nvidia-libraries/cufft/nvidia/cufft/bin;${sourceDir}/../.tools/native/vs/VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT",
-        "CUAJONE_ONNX_CUDA_PPE_MODEL": "${sourceDir}/../.tools/native/build/presets/windows-msvc/models/ppe.onnx",
-        "CUAJONE_ONNX_CUDA_POSE_MODEL": "${sourceDir}/../.tools/native/build/presets/windows-msvc/models/pose.onnx"
+        "NEXOAI_ONNX_CUDA_DEPENDENCY_ROOTS": "${sourceDir}/../.tools/native/onnxruntime-win-x64-gpu-1.25.0/lib;${sourceDir}/../.tools/native/cuda-runtime/nvidia/cuda_runtime/bin;${sourceDir}/../.tools/native/nvidia-libraries/cublas/nvidia/cublas/bin;${sourceDir}/../.tools/native/nvidia-libraries/cudnn/nvidia/cudnn/bin;${sourceDir}/../.tools/native/nvidia-libraries/cufft/nvidia/cufft/bin;${sourceDir}/../.tools/native/vs/VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT",
+        "NEXOAI_ONNX_CUDA_PPE_MODEL": "${sourceDir}/../.tools/native/build/presets/windows-msvc/models/ppe.onnx",
+        "NEXOAI_ONNX_CUDA_POSE_MODEL": "${sourceDir}/../.tools/native/build/presets/windows-msvc/models/pose.onnx"
       }
     }
   ],
@@ -111,7 +110,7 @@
     {
       "name": "gpu-onnx-integration-release",
       "configurePreset": "gpu-onnx-integration",
-      "targets": ["cuajone_onnx_cuda_integration_tests"]
+      "targets": ["nexoai_onnx_cuda_integration_tests"]
     }
   ],
   "testPresets": [
@@ -135,7 +134,7 @@
       "configurePreset": "gpu-onnx-integration",
       "filter": {
         "include": {
-          "name": "^cuajone_onnx_(pose_cpu_standalone|cuda_ppe_only|cuda_hybrid_pipeline)_tests$"
+          "name": "^nexoai_onnx_(pose_cpu_standalone|cuda_ppe_only|cuda_hybrid_pipeline)_tests$"
         }
       },
       "output": { "outputOnFailure": true }

@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from cuajone_qa.backends.native import NativeBackend
-from cuajone_qa.config import QaRuntimeConfig
-from cuajone_qa.contracts import CONTRACT_VERSION, CONTRACT_VERSION_V2
-from cuajone_qa.ppe import PPE_LABELS
+from nexoai_qa.backends.native import NativeBackend
+from nexoai_qa.config import QaRuntimeConfig
+from nexoai_qa.contracts import CONTRACT_VERSION, CONTRACT_VERSION_V2
+from nexoai_qa.ppe import PPE_LABELS
 
 
 FIXED_LABELS = dict(enumerate(PPE_LABELS))

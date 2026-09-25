@@ -41,7 +41,7 @@ $byteTrackArchive = Join-Path $downloadRoot "byte-track-eigen-$byteTrackCommit.z
 $eigenArchive = Join-Path $downloadRoot "eigen-$eigenCommit.zip"
 $byteTrackTarget = Join-Path $dependencyRoot "byte-track-eigen-$byteTrackCommit"
 $eigenTarget = Join-Path $dependencyRoot "eigen-$eigenCommit"
-$patchPath = Join-Path $PSScriptRoot "third_party\byte-track-eigen-cuajone.patch"
+$patchPath = Join-Path $PSScriptRoot "third_party\byte-track-eigen-nexoai.patch"
 
 function Ensure-Directory([string]$Path) {
     $fullPath = [System.IO.Path]::GetFullPath($Path)
@@ -75,7 +75,7 @@ function Expand-VerifiedDependency(
     [string]$Marker,
     [scriptblock]$AfterExpand
 ) {
-    $receiptPath = Join-Path $Target ".cuajone-source-receipt.json"
+    $receiptPath = Join-Path $Target ".nexoai-source-receipt.json"
     $archiveSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $Archive).Hash.ToLowerInvariant()
     $patchSha256 = if (Test-Path -LiteralPath $patchPath -PathType Leaf) {
         (Get-FileHash -Algorithm SHA256 -LiteralPath $patchPath).Hash.ToLowerInvariant()

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cuajone.example/contracts/v3/frame-result.schema.json",
+  "$id": "https://nexoai.example/contracts/v3/frame-result.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract_version", "source_id", "frame_id", "monotonic_timestamp_ms", "observed_at", "frame", "people", "events"],

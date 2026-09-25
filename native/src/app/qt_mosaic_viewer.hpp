@@ -13,7 +13,7 @@
 
 class QApplication;
 
-namespace cuajone {
+namespace nexoai {
 
 struct QtMosaicGridLayout {
     std::size_t rows{};
@@ -64,4 +64,4 @@ private:
     bool quit_requested_{};
 };
 
-}  // namespace cuajone
+}  // namespace nexoai

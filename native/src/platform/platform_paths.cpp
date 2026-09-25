@@ -5,7 +5,7 @@
 #include <chrono>
 #include <fstream>
 
-namespace cuajone::platform {
+namespace nexoai::platform {
 namespace {
 
 void appendOnce(
@@ -62,4 +62,4 @@ bool ensureWritableDirectory(const std::filesystem::path& directory) {
     return true;
 }
 
-}  // namespace cuajone::platform
+}  // namespace nexoai::platform

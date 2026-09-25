@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/capture.hpp"
-#include "cuajone/cli.hpp"
-#include "cuajone/performance_telemetry.hpp"
+#include "nexoai/capture.hpp"
+#include "nexoai/cli.hpp"
+#include "nexoai/performance_telemetry.hpp"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -36,7 +36,7 @@
 #include <thread>
 #include <vector>
 
-namespace cuajone {
+namespace nexoai {
 namespace {
 
 bool isLiteralIpv4(std::string_view host) noexcept {
@@ -661,6 +661,13 @@ void LatestFrameCapture::readerLoop(std::stop_token stop_token) {
             const std::vector<int> base_parameters = parameters;
             if (rtsp) {
                 int acceleration = cv::VIDEO_ACCELERATION_ANY;
+#ifdef _WIN32
+                // OpenCV's FFmpeg AUTO path can select D3D11 on Windows. The
+                // camera frame is copied into a CPU BGR canvas for Qt anyway;
+                // use FFmpeg's software decoder unless hardware was requested
+                // explicitly, avoiding device-dependent decode artifacts.
+                acceleration = cv::VIDEO_ACCELERATION_NONE;
+#endif
                 if (video_acceleration_ == VideoAcceleration::D3d11) {
                     acceleration = cv::VIDEO_ACCELERATION_D3D11;
                 } else if (video_acceleration_ == VideoAcceleration::Vaapi) {
@@ -687,7 +694,7 @@ void LatestFrameCapture::readerLoop(std::stop_token stop_token) {
                     ? capture.open(source_, cv::CAP_FFMPEG)
                     : capture.open(source_, cv::CAP_FFMPEG, software_parameters);
             }
-            if (!opened && !base_parameters.empty()) {
+            if (!opened && !rtsp && !base_parameters.empty()) {
                 capture.release();
                 opened = capture.open(source_, cv::CAP_FFMPEG);
             }
@@ -765,4 +772,4 @@ void LatestFrameCapture::readerLoop(std::stop_token stop_token) {
     condition_.notify_all();
 }
 
-}  // namespace cuajone
+}  // namespace nexoai

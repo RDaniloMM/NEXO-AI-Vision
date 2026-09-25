@@ -1,17 +1,17 @@
-#include "cuajone/engine_reader.hpp"
+#include "nexoai/engine_reader.hpp"
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "cuajone/cli.hpp"
-#include "cuajone/analytics_pipeline.hpp"
-#include "cuajone/byte_tracker.hpp"
-#include "cuajone/contracts.hpp"
-#include "cuajone/engine_pipeline.hpp"
-#include "cuajone/fall_analytics.hpp"
-#include "cuajone/ppe_analytics.hpp"
-#include "cuajone/preprocess.hpp"
-#include "cuajone/performance_telemetry.hpp"
-#include "cuajone/runtime_execution_plan.hpp"
-#include "cuajone/yolo_decode.hpp"
+#include "nexoai/cli.hpp"
+#include "nexoai/analytics_pipeline.hpp"
+#include "nexoai/byte_tracker.hpp"
+#include "nexoai/contracts.hpp"
+#include "nexoai/engine_pipeline.hpp"
+#include "nexoai/fall_analytics.hpp"
+#include "nexoai/ppe_analytics.hpp"
+#include "nexoai/preprocess.hpp"
+#include "nexoai/performance_telemetry.hpp"
+#include "nexoai/runtime_execution_plan.hpp"
+#include "nexoai/yolo_decode.hpp"
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -34,7 +34,7 @@
 
 namespace {
 
-using namespace cuajone;
+using namespace nexoai;
 using Clock = std::chrono::steady_clock;
 
 void require(bool condition, const std::string& message) {
@@ -64,7 +64,7 @@ public:
         const std::vector<unsigned char>& bytes,
         std::string_view extension = ".engine") {
         path_ = std::filesystem::temp_directory_path()
-            / ("nexoai_vision_" + std::to_string(++sequence_) + std::string(extension));
+            / ("nexoai_" + std::to_string(++sequence_) + std::string(extension));
         std::ofstream output(path_, std::ios::binary);
         output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     }
@@ -787,7 +787,7 @@ void testCanonicalRenderDecision() {
 
     CanonicalFrameResult event_frame;
     event_frame.events.push_back({
-        "evt-RENDER_QA-2-7-0", "urn:cuajone:camera:RENDER_QA", "com.cuajone.safety.ppe.violation.v2",
+        "evt-RENDER_QA-2-7-0", "urn:nexoai:camera:RENDER_QA", "com.nexoai.safety.ppe.violation.v2",
         "2026-01-01T00:00:00.200Z", "track/7", 2, 200, 7, "Falta: Vest", 0.9F, std::nullopt,
     });
     const std::string event_json = canonicalJson(event_frame.events.front());
@@ -1372,7 +1372,7 @@ void testCanonicalContractsAndDeterministicPipeline() {
     const std::string event_v2 = canonicalJsonV2(second.canonical.events.front());
     require(frame_v2.find("\"contract_version\":\"2.0.0\"") != std::string::npos
             && frame_v2.find("\"required\":[\"gloves\",\"safety_boots\",\"vest\",\"respirator\",\"hearing_protection\",\"hard_hat\",\"eye_protection\"]") != std::string::npos
-            && event_v2.find("com.cuajone.safety.ppe.violation.v2") != std::string::npos,
+            && event_v2.find("com.nexoai.safety.ppe.violation.v2") != std::string::npos,
         "Structured PPE v2 frame/event serialization is incomplete");
 
     PpeConfig disabled_gloves{1, 1, 0.5F, std::chrono::seconds(60), std::chrono::seconds(5)};
@@ -1388,7 +1388,7 @@ void testCanonicalContractsAndDeterministicPipeline() {
     require(disabled_v2.find("\"missing\":[\"gloves\"") == std::string::npos
             && disabled_v2.find("\"missing\":[\"safety_boots\"") != std::string::npos,
         "Disabled PPE was emitted as missing in the v2 projection");
-    require(event_json.find("com.cuajone.safety.ppe.violation.v1") != std::string::npos
+    require(event_json.find("com.nexoai.safety.ppe.violation.v1") != std::string::npos
             && event_json.find("Sin Casco y Chaleco") != std::string::npos,
         "Explicit v1 helmet/vest projection was not preserved");
     requireThrows([&] { pipeline.process(syntheticPpeFrame(2, 300)); },

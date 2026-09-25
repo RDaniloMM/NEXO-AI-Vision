@@ -41,7 +41,7 @@ fuente cubierto por MPL-2.0 mediante un medio razonable y oportuno.
 ## Runtime Python de QA y herramientas opcionales
 
 `jsonschema` 4.25.1 (MIT) es una dependencia requerida del runtime Python de QA
-porque `cuajone_qa` valida contratos en sus fronteras de entrada. `pybind11` 3.0.4
+porque `nexoai_qa` valida contratos en sus fronteras de entrada. `pybind11` 3.0.4
 (BSD-3-Clause) se usa para construir el binding de desarrollo. Supervision 0.29.1
 (MIT) y `cvat-sdk` 2.71.0 (MIT) son extras opcionales con imports diferidos. Todos
 conservan sus licencias upstream; ninguno de estos paquetes, sus runtimes ni sus

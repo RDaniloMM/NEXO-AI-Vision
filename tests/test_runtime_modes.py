@@ -18,7 +18,7 @@ import ppe_reportev2 as app
 
 
 def test_facade_import_does_not_load_experimental_dependencies() -> None:
-    environment = dict(os.environ, CUAJONE_SKIP_DOTENV="1")
+    environment = dict(os.environ, NEXOAI_SKIP_DOTENV="1")
     result = subprocess.run(
         [
             sys.executable,
@@ -108,12 +108,12 @@ def test_local_native_binding_is_discovered_automatically(
     onnx_lib.mkdir(parents=True)
     monkeypatch.setattr(app, "RUNTIME_DIR", tmp_path)
     monkeypatch.setattr(sys, "path", list(sys.path))
-    monkeypatch.delenv("CUAJONE_NATIVE_DLL_DIRS", raising=False)
+    monkeypatch.delenv("NEXOAI_NATIVE_DLL_DIRS", raising=False)
 
     app.configure_local_native_binding()
 
     assert sys.path[0] == str(build_python.resolve())
-    assert os.environ["CUAJONE_NATIVE_DLL_DIRS"].split(os.pathsep) == [
+    assert os.environ["NEXOAI_NATIVE_DLL_DIRS"].split(os.pathsep) == [
         str(build_python.resolve()),
         str(onnx_lib.resolve()),
     ]
@@ -151,7 +151,7 @@ def test_native_preflight_reports_fixed_onnx_without_rtsp(
     output = capsys.readouterr()
     assert "Modo de analítica: ppe-only" in output.out
     assert f"Modelo EPP ONNX: {onnx}" in output.out
-    assert "Binding cuajone_native: OK" in output.out
+    assert "Binding nexoai_native: OK" in output.out
     assert "Preflight: OK" in output.out
     assert output.err == ""
 
@@ -178,8 +178,8 @@ def test_native_preflight_propagates_engine_startup_failure(
     assert app.main(["--mode", "ppe-only", "--preflight"]) == 1
 
     output = capsys.readouterr()
-    assert "Binding cuajone_native: FALTA" in output.out
-    assert "Binding cuajone_native no disponible" in output.err
+    assert "Binding nexoai_native: FALTA" in output.out
+    assert "Binding nexoai_native no disponible" in output.err
     assert "engine construction failed" in output.err
     assert "Preflight: ERROR" in output.err
 
@@ -261,7 +261,7 @@ def test_native_frame_translates_canonical_events_for_existing_report() -> None:
                 events=(
                     {
                         "id": "evt-CAM_P01-1-3-0",
-                        "type": "com.cuajone.safety.ppe.violation.v2",
+                        "type": "com.nexoai.safety.ppe.violation.v2",
                         "data": {
                             "track_id": 3,
                             "status": "Falta: Vest",
