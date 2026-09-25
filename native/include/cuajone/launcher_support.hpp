@@ -45,6 +45,7 @@ struct OperatorPreferences {
         0.10F, 0.10F, 0.10F, 0.10F, 0.10F, 0.10F, 0.10F, 0.10F,
     };
     std::array<bool, kPpeItemCount> ppe_enabled{true, true, true, true, true, true, true};
+    bool pose_requires_person{true};
     bool show_window{true};
     RtspTransport rtsp_transport{RtspTransport::Tcp};
     VideoAcceleration video_acceleration{VideoAcceleration::Auto};
@@ -100,6 +101,7 @@ struct LauncherSettings {
     std::filesystem::path output;
     AnalyticsMode analytics_mode{AnalyticsMode::PpeFall};
     ComputeMode compute_mode{ComputeMode::Auto};
+    bool pose_requires_person{true};
     RtspTransport rtsp_transport{RtspTransport::Tcp};
     VideoAcceleration video_acceleration{VideoAcceleration::Auto};
     std::wstring stream_resolution{L"1920x1080"};

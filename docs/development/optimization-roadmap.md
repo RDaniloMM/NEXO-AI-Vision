@@ -59,15 +59,19 @@ más allá de la tolerancia acordada, aunque el mAP agregado mejore.
 
 ### Gate de pose por persona (paso 6)
 
-- CLI nativa: `--pose-person-gate`. Facade QA: `POSE_PERSON_GATE=1` en `.env`.
-- Con el gate activo, si PPE no detectó ninguna persona en el frame se omite
-  todo el stage de pose (preproceso + inferencia + decode) y `poses` queda
-  vacío; la analítica de caídas no cambia para frames con personas.
-- El gate es incompatible con los solapamientos PPE/pose (ORT híbrido y
-  TensorRT multi-engine) porque exige la decisión de PPE antes de programar
-  pose: al activarlo esas rutas pasan a ejecución serie. En escenas vacías el
-  ahorro domina; en escenas con personas permanentes evaluar ambos modos con
-  el benchmark antes de fijar producción.
+- CLI nativa: gate activo por defecto; `--no-pose-person-gate` conserva la ruta
+  diagnóstica en todos los frames. Facade QA: `POSE_PERSON_GATE=1` por defecto.
+- Con el gate activo, si PPE no detectó ninguna persona en el frame, `poses`
+  queda vacío. En rutas seriales y micro-batches se omite pose para esos
+  frames; en rutas con solapamiento, pose se lanza especulativamente y se
+  descarta su resultado si PPE no detecta una persona.
+- El reporte distingue `pose_inference_executed_frames` de
+  `pose_inference_skipped_person_gate_frames`. `pose_inference.samples` cuenta
+  invocaciones de inferencia (una por micro-batch), mientras los contadores
+  anteriores cuentan frames.
+- El gate no desactiva el solapamiento PPE/pose (ORT híbrido y TensorRT
+  multi-engine en GPUs aptas). En esas rutas no ahorra inferencia de pose:
+  los contadores de omisión permanecen en cero aunque se descarte el resultado.
 - Pose ya se ejecuta en GPU en la ruta TensorRT. En la ruta ONNX Runtime CUDA
   híbrida pose permanece en CPU por la inestabilidad documentada del grafo
   pose en ORT CUDA 1.25 (GTX 1650 Ti); reevaluar sobre TensorRT, no sobre ORT.

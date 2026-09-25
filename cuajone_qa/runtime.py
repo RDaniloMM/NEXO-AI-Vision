@@ -148,7 +148,7 @@ class RuntimeSettings:
             ppe_imgsz=int(value("PPE_IMGSZ", "640") or ""),
             use_fp16=value("USE_FP16", "1") == "1",
             pose_conf=float(value("POSE_CONF", "0.35") or ""),
-            pose_person_gate=value("POSE_PERSON_GATE", "0") == "1",
+            pose_person_gate=value("POSE_PERSON_GATE", "1") == "1",
             ppe_conf=float(value("PPE_CONF", "0.30") or ""),
             iou_threshold=float(value("IOU_THRESHOLD", "0.45") or ""),
             epp_window=int(value("EPP_WINDOW", "20") or ""),

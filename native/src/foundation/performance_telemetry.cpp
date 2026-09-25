@@ -99,6 +99,8 @@ struct PerformanceTelemetry::Impl {
     std::uint64_t captured_frames{};
     std::uint64_t displayed_frames{};
     std::uint64_t processed_frames{};
+    std::uint64_t pose_executed_frames{};
+    std::uint64_t pose_skipped_person_gate_frames{};
     std::uint64_t latest_slot_sequence_gap_drops{};
     std::uint64_t capture_wait_timeouts{};
     std::uint64_t target_fps_skipped_frames{};
@@ -187,6 +189,16 @@ void PerformanceTelemetry::setExecutionPath(ExecutionPathInfo info) {
     impl_->execution_path = std::move(info);
 }
 
+void PerformanceTelemetry::poseInferenceExecuted(std::size_t frame_count) {
+    std::scoped_lock lock(impl_->mutex);
+    impl_->pose_executed_frames += frame_count;
+}
+
+void PerformanceTelemetry::poseInferenceSkippedByPersonGate(std::size_t frame_count) {
+    std::scoped_lock lock(impl_->mutex);
+    impl_->pose_skipped_person_gate_frames += frame_count;
+}
+
 void PerformanceTelemetry::setCaptureStreamInfo(CaptureStreamInfo info) {
     std::scoped_lock lock(impl_->mutex);
     impl_->capture_stream = std::move(info);
@@ -198,6 +210,8 @@ void PerformanceTelemetry::reset() {
     impl_->captured_frames = 0;
     impl_->displayed_frames = 0;
     impl_->processed_frames = 0;
+    impl_->pose_executed_frames = 0;
+    impl_->pose_skipped_person_gate_frames = 0;
     impl_->latest_slot_sequence_gap_drops = 0;
     impl_->capture_wait_timeouts = 0;
     impl_->target_fps_skipped_frames = 0;
@@ -227,6 +241,15 @@ OverlayMetrics PerformanceTelemetry::overlayMetrics(int frame_width, int frame_h
         impl_->stages[stageIndex(PerformanceStage::PpeInference)], 0.50);
     result.pose_inference_p50_ms = percentileValue(
         impl_->stages[stageIndex(PerformanceStage::PoseInference)], 0.50);
+    result.pose_executed_frames = impl_->pose_executed_frames;
+    result.pose_skipped_person_gate_frames = impl_->pose_skipped_person_gate_frames;
+    const std::uint64_t pose_decisions = result.pose_executed_frames
+        + result.pose_skipped_person_gate_frames;
+    if (pose_decisions != 0) {
+        result.pose_person_gate_savings_percent = 100.0
+            * static_cast<double>(result.pose_skipped_person_gate_frames)
+            / static_cast<double>(pose_decisions);
+    }
     if (impl_->capture_stream) {
         result.video_codec = impl_->capture_stream->codec;
         result.capture_backend = impl_->capture_stream->backend;
@@ -254,9 +277,12 @@ std::string PerformanceTelemetry::jsonReport() const {
            << "\",\"counts\":{\"captured_frames\":" << impl_->captured_frames
            << ",\"processed_frames\":" << impl_->processed_frames
            << ",\"latest_slot_sequence_gap_drops\":" << impl_->latest_slot_sequence_gap_drops
-           << ",\"capture_wait_timeouts\":" << impl_->capture_wait_timeouts
-           << ",\"target_fps_skipped_frames\":" << impl_->target_fps_skipped_frames
-           << "},\"stages_ms\":{";
+            << ",\"capture_wait_timeouts\":" << impl_->capture_wait_timeouts
+            << ",\"target_fps_skipped_frames\":" << impl_->target_fps_skipped_frames
+            << ",\"pose_inference_executed_frames\":" << impl_->pose_executed_frames
+            << ",\"pose_inference_skipped_person_gate_frames\":"
+            << impl_->pose_skipped_person_gate_frames
+            << "},\"stages_ms\":{";
     for (std::size_t index = 0; index < kStageNames.size(); ++index) {
         if (index != 0) output << ',';
         output << '"' << kStageNames[index] << "\":";

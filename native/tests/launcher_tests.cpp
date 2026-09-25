@@ -149,6 +149,7 @@ void testModelMatrixAndArguments() {
     require(contains(cuda_auto.arguments, L"--preflight")
             && contains(cuda_auto.arguments, L"--ppe-engine")
             && contains(cuda_auto.arguments, L"--pose-engine")
+            && contains(cuda_auto.arguments, L"--pose-person-gate")
             && contains(cuda_auto.arguments, L"--source-label")
             && contains(cuda_auto.arguments, L"CAM_CUAJONE_01")
             && contains(cuda_auto.arguments, L"--target-fps")
@@ -233,8 +234,30 @@ void testPpeOnlyOmitsPoseArguments() {
             && contains(automatic.arguments, L"--ppe-engine")
             && contains(automatic.arguments, L"--ppe-onnx")
             && !contains(automatic.arguments, L"--pose-engine")
-            && !contains(automatic.arguments, L"--pose-onnx"),
+            && !contains(automatic.arguments, L"--pose-onnx")
+            && !contains(automatic.arguments, L"--pose-person-gate")
+            && !contains(automatic.arguments, L"--no-pose-person-gate"),
         "PPE-only Auto plan did not preserve both candidates or leaked pose arguments");
+}
+
+void testPosePersonGateArguments() {
+    TemporaryTree tree;
+    auto settings = baseSettings(tree);
+    addOnnxModels(settings, tree);
+    settings.compute_mode = ComputeMode::Cpu;
+    require(settings.pose_requires_person
+            && contains(buildLaunchPlan(settings, false).arguments, L"--pose-person-gate"),
+        "PPE-fall launcher plan did not enable the safe pose person gate by default");
+    settings.pose_requires_person = false;
+    const auto disabled = buildLaunchPlan(settings, false).arguments;
+    require(contains(disabled, L"--no-pose-person-gate")
+            && !contains(disabled, L"--pose-person-gate"),
+        "Advanced pose person gate setting did not emit an explicit disable override");
+    for (const auto* flag : {L"--pose-person-gate", L"--no-pose-person-gate"}) {
+        settings.runtime_options = {{flag, L"1"}};
+        requireThrows([&] { buildLaunchPlan(settings, false); },
+            "Untyped runtime options bypassed the advanced pose person gate setting");
+    }
 }
 
 void testOperationalSettingsAndArguments() {
@@ -319,8 +342,9 @@ void testPpeConfidenceThresholdParsing() {
 void testPreferencesPersistenceAndUiContract() {
     TemporaryTree tree;
     const auto path = tree.root() / L"settings" / L"operator-settings-v1.txt";
-    require(OperatorPreferences{}.show_window && LauncherSettings{}.show_window,
-        "Annotated video does not default to enabled");
+    require(OperatorPreferences{}.show_window && LauncherSettings{}.show_window
+            && OperatorPreferences{}.pose_requires_person,
+        "Safe operator preference defaults changed");
     OperatorPreferences preferences;
     preferences.language = UiLanguage::Spanish;
     preferences.theme = ThemeMode::Dark;
@@ -330,6 +354,7 @@ void testPreferencesPersistenceAndUiContract() {
     preferences.show_window = false;
     preferences.ppe_enabled[0] = false;
     preferences.ppe_enabled[6] = false;
+    preferences.pose_requires_person = false;
     preferences.rtsp_transport = RtspTransport::Udp;
     preferences.video_acceleration = VideoAcceleration::Cpu;
     preferences.stream_resolution = L"2560x1440";
@@ -341,6 +366,7 @@ void testPreferencesPersistenceAndUiContract() {
             && loaded.ppe_class_confidences[0] == 0.11F
             && loaded.ppe_class_confidences[7] == 0.88F
             && !loaded.show_window && !loaded.ppe_enabled[0] && !loaded.ppe_enabled[6]
+            && !loaded.pose_requires_person
             && loaded.rtsp_transport == RtspTransport::Udp
             && loaded.video_acceleration == VideoAcceleration::Cpu
             && loaded.stream_resolution == L"2560x1440" && loaded.stream_fps == 25,
@@ -358,6 +384,7 @@ void testPreferencesPersistenceAndUiContract() {
             && legacy.ppe_class_confidences[7] == 0.88F && legacy.show_window
             && legacy.rtsp_transport == RtspTransport::Tcp
             && legacy.video_acceleration == VideoAcceleration::Auto
+            && legacy.pose_requires_person
             && legacy.stream_resolution == L"1920x1080" && legacy.stream_fps == 25
             && std::ranges::all_of(legacy.ppe_enabled, [](bool enabled) { return enabled; }),
         "Legacy preferences did not retain settings and default annotated video to enabled");
@@ -365,7 +392,7 @@ void testPreferencesPersistenceAndUiContract() {
     const auto fallback = loadOperatorPreferences(path);
     require(fallback.language == UiLanguage::English && fallback.theme == ThemeMode::Light
             && fallback.image_size == 640 && fallback.ppe_class_confidences[0] == 0.10F
-            && fallback.show_window,
+            && fallback.show_window && fallback.pose_requires_person,
         "Corrupt preferences did not fail closed to defaults");
 
     const auto controls = visibleLauncherControlKeys();
@@ -561,6 +588,7 @@ int main(int argc, char** argv) {
         {"camera or video source requirement", testCameraOrVideoSourceIsRequired},
         {"launcher model matrix and arguments", testModelMatrixAndArguments},
         {"PPE-only pose omission", testPpeOnlyOmitsPoseArguments},
+        {"pose person gate arguments", testPosePersonGateArguments},
         {"operational settings and arguments", testOperationalSettingsAndArguments},
         {"PPE confidence threshold parsing", testPpeConfidenceThresholdParsing},
         {"preferences persistence and UI contract", testPreferencesPersistenceAndUiContract},

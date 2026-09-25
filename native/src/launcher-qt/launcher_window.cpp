@@ -352,6 +352,7 @@ void LauncherWindow::loadState() {
     if (static_cast<int>(compute_mode_) < static_cast<int>(ComputeMode::Auto)
         || static_cast<int>(compute_mode_) > static_cast<int>(ComputeMode::Cpu)) compute_mode_ = ComputeMode::Auto;
     telemetry_enabled_ = settings.value("telemetry_enabled", false).toBool();
+    pose_requires_person_ = preferences_.pose_requires_person;
     telemetry_interval_seconds_ = settings.value("telemetry_interval_seconds", 5).toInt();
     selected_profiles_ = settings.value("selected_profiles").toStringList();
     if (std::ranges::find(cuajone::launcher::kTelemetryIntervals, telemetry_interval_seconds_)
@@ -368,7 +369,9 @@ void LauncherWindow::saveState() const {
         settings.setValue("telemetry_interval_seconds", telemetry_interval_seconds_);
         settings.setValue("selected_profiles", profileNames(profiles_));
         settings.sync();
-        cuajone::launcher::saveOperatorPreferencesAtomic(preferences_path_, preferences_);
+        auto preferences = preferences_;
+        preferences.pose_requires_person = pose_requires_person_;
+        cuajone::launcher::saveOperatorPreferencesAtomic(preferences_path_, preferences);
     } catch (...) {
         // A read-only configuration directory must not prevent the launcher
         // from closing; the next run will use safe defaults.
@@ -551,6 +554,7 @@ LauncherSettings LauncherWindow::readLauncherSettings() const {
     settings.output = filePath(cleanText(output_->text()));
     settings.analytics_mode = AnalyticsMode::PpeFall;
     settings.compute_mode = compute_mode_;
+    settings.pose_requires_person = pose_requires_person_;
     settings.rtsp_transport = preferences_.rtsp_transport;
     settings.video_acceleration = preferences_.video_acceleration;
     settings.stream_resolution = preferences_.stream_resolution;
@@ -714,8 +718,12 @@ void LauncherWindow::openAdvancedSettings() {
     acceleration->addItems({"Auto", "CPU", "VAAPI"});
     acceleration->setCurrentIndex(preferences_.video_acceleration == VideoAcceleration::Cpu ? 1
         : preferences_.video_acceleration == VideoAcceleration::Vaapi ? 2 : 0);
+    auto* posePersonGate = new QCheckBox(
+        "Run pose only when PPE detects a person", &dialog);
+    posePersonGate->setChecked(pose_requires_person_);
     form->addRow("Compute", compute);
     form->addRow("Inference image size", imgsz);
+    form->addRow(posePersonGate);
     form->addRow("Stream resolution", resolution);
     form->addRow("Stream FPS", fps);
     form->addRow(telemetry);
@@ -732,6 +740,7 @@ void LauncherWindow::openAdvancedSettings() {
     preferences_.stream_resolution = wide(resolution->currentText());
     preferences_.stream_fps = fps->currentText().toInt();
     telemetry_enabled_ = telemetry->isChecked();
+    pose_requires_person_ = posePersonGate->isChecked();
     telemetry_interval_seconds_ = interval->currentData().toInt();
     preferences_.video_acceleration = accelerationAt(acceleration->currentIndex());
     try {
@@ -800,6 +809,13 @@ void LauncherWindow::importEnv() {
         if (!confidence.isEmpty()) {
             const float value = cuajone::launcher::parsePpeConfidenceThreshold(wide(confidence));
             preferences_.ppe_class_confidences.fill(value);
+        }
+        const QString posePersonGate = envValue(values, "POSE_PERSON_GATE");
+        if (!posePersonGate.isEmpty()) {
+            if (posePersonGate != "0" && posePersonGate != "1") {
+                throw std::invalid_argument("POSE_PERSON_GATE must be 0 or 1");
+            }
+            pose_requires_person_ = posePersonGate == "1";
         }
         const QString resolution = envValue(values, "RTSP_RESOLUTION");
         if (!resolution.isEmpty()) preferences_.stream_resolution = wide(resolution);

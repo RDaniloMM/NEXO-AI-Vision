@@ -44,7 +44,7 @@ struct RuntimeConfig {
     bool capture_open_timeout_explicit{};
     bool capture_read_timeout_explicit{};
     bool allow_nonperson_pose_class{};
-    bool pose_requires_person{};
+    bool pose_requires_person{true};
     ComputeBackend compute_backend{ComputeBackend::Auto};
     AnalyticsMode analytics_mode{AnalyticsMode::PpeFall};
     std::string source;

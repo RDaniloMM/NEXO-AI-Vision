@@ -342,6 +342,17 @@ std::unique_ptr<NativeEnginePipeline> runBasePreflight(
                   << summary.maximum_batch_size << ")\n";
     }
     std::cout << "OpenCV: " << CV_VERSION << " | provider: " << summary.provider << '\n';
+    if (summary.pose_loaded) {
+        std::cout << "Pose backend: " << summary.pose_provider << '\n';
+        if (selection.provider == InferenceProvider::OnnxRuntimeCuda) {
+            std::cout << "Pose acceleration: compatible TensorRT engines are required for GPU pose; ";
+            if (summary.compute_major == 7 && summary.compute_minor == 5) {
+                std::cout << "ORT CUDA pose remains disabled on SM 7.5 for stability\n";
+            } else {
+                std::cout << "this Windows ONNX hybrid path uses the validated CPU fallback\n";
+            }
+        }
+    }
     std::cout << "Maximum inference batch: " << summary.maximum_batch_size << '\n';
     std::cout << "Inference imgsz: " << summary.image_size << 'x' << summary.image_size << '\n';
     if (selection.backend == ComputeBackend::Cuda) {
@@ -376,8 +387,12 @@ std::unique_ptr<NativeEnginePipeline> runBasePreflight(
             }
         }
         std::cout << "Output: " << config.output.string() << '\n';
-        if (summary.pose_loaded && summary.pose_requires_person) {
-            std::cout << "Pose person gate: enabled (pose runs only when PPE detects a person)\n";
+        if (summary.pose_loaded) {
+            std::cout << "Pose person gate: "
+                      << (summary.pose_requires_person
+                              ? "enabled (pose runs only when PPE detects a person)"
+                              : "disabled (pose runs on every frame)")
+                      << '\n';
         }
     } else {
         std::cout << "Source: benchmark-image\n";
@@ -470,7 +485,7 @@ void drawAssociatedItem(cv::Mat& frame, const std::optional<Detection>& item, co
     bool source_connected = true) {
     constexpr int kPadding = 10;
     const int line_height = 18;
-    const int line_count = 14;
+    const int line_count = 15;
     const int width = std::min(frame.cols, std::min(390, std::max(280, frame.cols / 3)));
     const int height = kPadding * 2 + line_count * line_height;
     const cv::Rect panel(0, 0, width, std::min(height, frame.rows));
@@ -491,6 +506,9 @@ void drawAssociatedItem(cv::Mat& frame, const std::optional<Detection>& item, co
         "Latencia total p50: " + std::format("{:.1f} ms", metrics.pipeline_p50_ms),
         "Inferencia EPP p50: " + std::format("{:.1f} ms", metrics.ppe_inference_p50_ms),
         "Inferencia pose p50: " + std::format("{:.1f} ms", metrics.pose_inference_p50_ms),
+        "Pose: " + std::to_string(metrics.pose_executed_frames) + " ejecutados / "
+            + std::to_string(metrics.pose_skipped_person_gate_frames) + " omitidos ("
+            + std::format("{:.0f}%", metrics.pose_person_gate_savings_percent) + ")",
         "Frames omitidos: " + std::to_string(metrics.dropped_frames),
     };
     for (std::size_t index = 0; index < lines.size(); ++index) {
@@ -871,7 +889,7 @@ void drawPerformancePanelOnCanvas(
     cv::Mat& canvas, const cv::Rect& tile, const OverlayMetrics& metrics, bool connected) {
     constexpr int kPadding = 8;
     constexpr int kLineHeight = 16;
-    constexpr int kLineCount = 14;
+    constexpr int kLineCount = 15;
     const int width = std::min(tile.width, std::min(390, std::max(280, tile.width / 2)));
     const int height = std::min(tile.height, kPadding * 2 + kLineCount * kLineHeight);
     if (width <= 10 || height <= 10) return;
@@ -895,6 +913,9 @@ void drawPerformancePanelOnCanvas(
         "Latencia total p50: " + std::format("{:.1f} ms", metrics.pipeline_p50_ms),
         "Inferencia EPP p50: " + std::format("{:.1f} ms", metrics.ppe_inference_p50_ms),
         "Inferencia pose p50: " + std::format("{:.1f} ms", metrics.pose_inference_p50_ms),
+        "Pose: " + std::to_string(metrics.pose_executed_frames) + " ejecutados / "
+            + std::to_string(metrics.pose_skipped_person_gate_frames) + " omitidos ("
+            + std::format("{:.0f}%", metrics.pose_person_gate_savings_percent) + ")",
         "Frames omitidos: " + std::to_string(metrics.dropped_frames),
     };
     for (std::size_t index = 0; index < lines.size(); ++index) {

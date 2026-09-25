@@ -8,6 +8,7 @@
 
 #include <opencv2/core/mat.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -34,9 +35,9 @@ struct EnginePipelineConfig {
     std::size_t pose_class_count{1};
     std::array<int, 2> pose_keypoint_shape{17, 3};
     bool allow_nonperson_pose_class{};
-    // Opt-in latency gate: run pose only when PPE found at least one person,
-    // so empty scenes skip the whole pose preprocess/inference/decode cost.
-    bool pose_requires_person{};
+    // Safe default: pose can only affect analytics when PPE also found a
+    // person, so empty scenes skip pose preprocess/inference/decode entirely.
+    bool pose_requires_person{true};
     std::optional<int> device;
     int image_size{kDefaultImageSize};
     float ppe_confidence{0.10F};
@@ -62,6 +63,7 @@ struct EnginePipelineConfig {
 struct EnginePipelineSummary {
     ComputeBackend backend{ComputeBackend::Cpu};
     std::string provider;
+    std::string pose_provider;
     std::string device_name;
     int device_index{};
     int device_count{};
@@ -82,6 +84,18 @@ struct EngineFrameInput {
     std::int64_t monotonic_timestamp_ms{};
     std::string observed_at;
 };
+
+[[nodiscard]] inline bool shouldRunPoseInference(
+    bool pose_loaded,
+    bool pose_requires_person,
+    std::span<const Detection> ppe_detections,
+    std::span<const int> person_class_ids) noexcept {
+    if (!pose_loaded) return false;
+    if (!pose_requires_person) return true;
+    return std::ranges::any_of(ppe_detections, [&](const Detection& detection) {
+        return std::ranges::find(person_class_ids, detection.class_id) != person_class_ids.end();
+    });
+}
 
 class NativeEnginePipeline {
 public:

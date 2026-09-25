@@ -149,6 +149,10 @@ void requireHybridTelemetrySamples(const std::string& report, std::size_t frame_
     }
     require(report.find("\"pose_preprocess\":{\"samples\":0") != std::string::npos,
         "Equal resolved PPE and pose input dimensions did not record one shared preprocess stage");
+    require(report.find("\"pose_inference_executed_frames\":"
+            + std::to_string(frame_count)) != std::string::npos
+            && report.find("\"pose_inference_skipped_person_gate_frames\":0") != std::string::npos,
+        "Hybrid telemetry did not count each completed pose inference");
     require(report.find("\"captured_frames\":0,\"processed_frames\":0,") != std::string::npos,
         "Direct pipeline telemetry unexpectedly changed capture or processed-frame counters");
 }
@@ -233,6 +237,7 @@ void verifyPpeOnnxSessionContract(const std::filesystem::path& ppe_model, int de
             0.25F);
         const InferenceOutput output = session.infer(input);
         const std::vector<std::int64_t> expected_shape = manifest.dynamicShapes()
+                && manifest.inference_mode == "raw-nms"
             ? std::vector<std::int64_t>{1, 12, static_cast<std::int64_t>(yoloPredictionCount(image_size))}
             : session.outputShape();
         require(std::ranges::equal(output.shape, expected_shape),
@@ -278,6 +283,7 @@ void verifyNativePipeline(
         config.pose_keypoint_shape = {17, 3};
         config.device = device;
         config.analytics.mode = AnalyticsMode::PpeFall;
+        config.pose_requires_person = false;
         config.telemetry = &telemetry;
 #ifdef CUAJONE_INTERNAL_DIAGNOSTICS
         config.force_serial_hybrid = force_serial_hybrid;
@@ -311,6 +317,9 @@ void verifyNativePipeline(
         require(summary.provider
                 == "ONNX Runtime CUDAExecutionProvider (PPE) + CPUExecutionProvider (pose)",
             "NativeEnginePipeline did not report the PPE-CUDA/pose-CPU hybrid provider split");
+        require(summary.pose_provider
+                == "ONNX Runtime CPUExecutionProvider (hybrid safety fallback)",
+            "NativeEnginePipeline did not expose the effective pose provider");
         require(summary.pose_loaded, "NativeEnginePipeline did not load the pose model in ppe-fall mode");
         for (std::uint64_t frame_id = 1; frame_id <= frame_count; ++frame_id) {
             const ProcessedFrame processed = concurrent_pipeline.processFrame(
@@ -353,6 +362,58 @@ void verifyNativePipeline(
             "Serial and concurrent hybrid pipelines diverged in decoded PPE detections or associations");
     }
     requireHybridTelemetrySamples(serial_telemetry.jsonReport(), frame_count);
+
+    BaseTrack::reset_count();
+    PerformanceTelemetry gated_person_telemetry("image");
+    auto gated_person_config = make_config(gated_person_telemetry, false);
+    gated_person_config.pose_requires_person = true;
+    NativeEnginePipeline gated_person_pipeline(std::move(gated_person_config));
+    constexpr std::uint64_t gated_frame_count = 3;
+    for (std::uint64_t frame_id = 1; frame_id <= gated_frame_count; ++frame_id) {
+        const std::array<EngineFrameInput, 1> batch{{{
+            frame, "cuda-integration", frame_id, 1000 + static_cast<std::int64_t>(frame_id),
+            "2026-08-01T00:00:00Z",
+        }}};
+        const auto processed_batch = gated_person_pipeline.processBatch(batch);
+        const ProcessedFrame& processed = processed_batch.front();
+        require(!processed.canonical.people.empty()
+                && std::all_of(processed.canonical.people.begin(), processed.canonical.people.end(),
+                    [](const auto& person) { return person.keypoints.size() == 17; }),
+            "Person gate suppressed real pose output after PPE detected a person");
+        const FrameSnapshot& ungated = concurrent_frames.at(static_cast<std::size_t>(frame_id - 1));
+        require(ungated.canonical == canonicalJson(processed.canonical)
+                && ungated.associations == associationSnapshot(processed.associations),
+            "Person gate changed canonical detections, fall inputs, or PPE associations on a person frame");
+    }
+    const std::string gated_person_report = gated_person_telemetry.jsonReport();
+    require(gated_person_report.find("\"pose_inference_executed_frames\":3") != std::string::npos
+            && gated_person_report.find("\"pose_inference_skipped_person_gate_frames\":0") != std::string::npos
+            && gated_person_report.find("\"pose_inference\":{\"samples\":3") != std::string::npos
+            && gated_person_report.find("\"hybrid_pose_executor\":true") != std::string::npos,
+        "Person gate disabled hybrid overlap or failed to count pose for person frames");
+
+    BaseTrack::reset_count();
+    PerformanceTelemetry gated_empty_telemetry("image");
+    auto gated_empty_config = make_config(gated_empty_telemetry, false);
+    gated_empty_config.pose_requires_person = true;
+    NativeEnginePipeline gated_empty_pipeline(std::move(gated_empty_config));
+    cv::Mat empty_frame(720, 1280, CV_8UC3, cv::Scalar(0, 0, 0));
+    for (std::uint64_t frame_id = 1; frame_id <= gated_frame_count; ++frame_id) {
+        const std::array<EngineFrameInput, 1> batch{{{
+            empty_frame, "gated-empty", frame_id, 3000 + static_cast<std::int64_t>(frame_id),
+            "2026-08-01T00:00:00Z",
+        }}};
+        const auto processed_batch = gated_empty_pipeline.processBatch(batch);
+        const ProcessedFrame& processed = processed_batch.front();
+        require(processed.canonical.people.empty(),
+            "Known empty frame unexpectedly produced a gated person");
+    }
+    const std::string gated_empty_report = gated_empty_telemetry.jsonReport();
+    require(gated_empty_report.find("\"pose_inference_executed_frames\":3") != std::string::npos
+            && gated_empty_report.find("\"pose_inference_skipped_person_gate_frames\":0") != std::string::npos
+            && gated_empty_report.find("\"pose_inference\":{\"samples\":3") != std::string::npos
+            && gated_empty_report.find("\"hybrid_pose_executor\":true") != std::string::npos,
+        "Person gate did not preserve speculative hybrid overlap on empty frames");
     std::cout << "PASS: NativeEnginePipeline ppe-fall processed a deterministic BGR frame with "
               << serial_pipeline.summary().provider << "; people=" << people_count
               << "; pose loaded; frames=" << frame_count << '\n';
@@ -384,6 +445,8 @@ void runPpeOnly(const std::filesystem::path& ppe_model) {
     config.ppe_labels = stagedPpeLabels();
     config.device = device;
     config.analytics.mode = AnalyticsMode::PpeOnly;
+    PerformanceTelemetry telemetry("image");
+    config.telemetry = &telemetry;
     NativeEnginePipeline pipeline(std::move(config));
     require(pipeline.summary().backend == ComputeBackend::Cuda
             && pipeline.summary().provider == "ONNX Runtime CUDAExecutionProvider"
@@ -396,6 +459,9 @@ void runPpeOnly(const std::filesystem::path& ppe_model) {
             && processed.canonical.frame_width == frame.cols
             && processed.canonical.frame_height == frame.rows,
         "PPE-only production pipeline returned invalid canonical frame metadata");
+    require(telemetry.jsonReport().find("\"pose_inference_executed_frames\":0") != std::string::npos
+            && telemetry.jsonReport().find("\"pose_inference_skipped_person_gate_frames\":0") != std::string::npos,
+        "PPE-only changed pose execution counters");
     std::cout << "PASS: CUDAExecutionProvider executed the real staged PPE graph, OnnxSession "
                  "validated its static v1 or all bounded dynamic v2 input sizes, and the PPE-only "
                  "production pipeline processed a deterministic BGR frame"

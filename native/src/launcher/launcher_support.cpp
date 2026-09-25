@@ -633,6 +633,9 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
         if (option == L"--performance-report" || option == L"--telemetry-interval-sec") {
             throw std::invalid_argument("Use the launcher menu to configure performance debugging");
         }
+        if (option == L"--pose-person-gate" || option == L"--no-pose-person-gate") {
+            throw std::invalid_argument("Use advanced settings to configure the pose person gate");
+        }
         if (option == L"--rtsp-transport" || option == L"--video-acceleration") {
             throw std::invalid_argument("Use the launcher controls to configure RTSP transport and video decoding");
         }
@@ -703,6 +706,10 @@ LaunchPlan buildLaunchPlan(const LauncherSettings& settings, bool preflight) {
     appendOption(result.arguments, L"--output", settings.output);
     result.arguments.emplace_back(L"--mode");
     result.arguments.emplace_back(needs_pose ? L"ppe-fall" : L"ppe-only");
+    if (needs_pose) {
+        result.arguments.emplace_back(settings.pose_requires_person
+            ? L"--pose-person-gate" : L"--no-pose-person-gate");
+    }
     result.arguments.emplace_back(L"--compute");
     switch (settings.compute_mode) {
         case ComputeMode::Auto: result.arguments.emplace_back(L"auto"); break;
@@ -779,10 +786,10 @@ OperatorPreferences parseOperatorPreferences(std::string_view text) {
             throw std::invalid_argument("Preferences contain an invalid or duplicate entry");
         }
     }
-    static constexpr std::array<std::string_view, 11> supported_keys{
+    static constexpr std::array<std::string_view, 12> supported_keys{
         "schema_version", "language", "theme", "imgsz", "ppe_class_conf",
         "show_window", "ppe_enabled", "rtsp_transport", "video_acceleration",
-        "stream_resolution", "stream_fps",
+        "stream_resolution", "stream_fps", "pose_requires_person",
     };
     const bool has_unsupported_key = std::ranges::any_of(values, [](const auto& entry) {
         return std::ranges::find(supported_keys, entry.first) == supported_keys.end();
@@ -856,6 +863,11 @@ OperatorPreferences parseOperatorPreferences(std::string_view text) {
         }
         if (std::getline(switches, switch_entry, ',')) throw std::invalid_argument("Preferences PPE switches are excessive");
     }
+    if (const auto pose_gate = values.find("pose_requires_person"); pose_gate != values.end()) {
+        if (pose_gate->second == "1") result.pose_requires_person = true;
+        else if (pose_gate->second == "0") result.pose_requires_person = false;
+        else throw std::invalid_argument("Preferences pose_requires_person must be 0 or 1");
+    }
     if (const auto transport = values.find("rtsp_transport"); transport != values.end()) {
         if (transport->second == "default") result.rtsp_transport = RtspTransport::Default;
         else if (transport->second == "tcp") result.rtsp_transport = RtspTransport::Tcp;
@@ -895,6 +907,7 @@ std::string serializeOperatorPreferences(const OperatorPreferences& preferences)
            << "language=" << (preferences.language == UiLanguage::Spanish ? "es" : "en") << '\n'
            << "theme=" << (preferences.theme == ThemeMode::Dark ? "dark" : "light") << '\n'
            << "imgsz=" << preferences.image_size << '\n'
+           << "pose_requires_person=" << (preferences.pose_requires_person ? "1" : "0") << '\n'
            << "show_window=" << (preferences.show_window ? "1" : "0") << '\n'
            << "rtsp_transport="
            << (preferences.rtsp_transport == RtspTransport::Tcp ? "tcp"

@@ -110,6 +110,7 @@ struct LauncherWindow {
     HWND window{};
     HWND menu_button{};
     bool performance_report{};
+    bool pose_requires_person{true};
     int telemetry_interval_seconds{5};
     HWND source{};
     HWND source_label{};
@@ -919,6 +920,8 @@ INT_PTR CALLBACK advancedDialogProcedure(HWND dialog, UINT message, WPARAM wpara
         SendDlgItemMessageW(dialog, IDC_ADV_COMPUTE, CB_SETCURSEL, state->compute_mode == ComputeMode::Cuda ? 1 : state->compute_mode == ComputeMode::Cpu ? 2 : 0, 0);
         const auto image = std::ranges::find(kAllowedImageSizes, state->preferences.image_size);
         SendDlgItemMessageW(dialog, IDC_ADV_IMAGE_SIZE, CB_SETCURSEL, image == kAllowedImageSizes.end() ? 0 : image - kAllowedImageSizes.begin(), 0);
+        CheckDlgButton(dialog, IDC_ADV_POSE_PERSON_GATE,
+            state->pose_requires_person ? BST_CHECKED : BST_UNCHECKED);
         return TRUE;
     }
     if (message != WM_COMMAND || state == nullptr) return FALSE;
@@ -930,6 +933,9 @@ INT_PTR CALLBACK advancedDialogProcedure(HWND dialog, UINT message, WPARAM wpara
     if (analytics == CB_ERR || compute == CB_ERR || image == CB_ERR) return TRUE;
     state->analytics_mode = analytics == 1 ? AnalyticsMode::PpeOnly : AnalyticsMode::PpeFall;
     state->compute_mode = compute == 1 ? ComputeMode::Cuda : compute == 2 ? ComputeMode::Cpu : ComputeMode::Auto;
+    state->pose_requires_person = IsDlgButtonChecked(
+        dialog, IDC_ADV_POSE_PERSON_GATE) == BST_CHECKED;
+    state->preferences.pose_requires_person = state->pose_requires_person;
     state->preferences.image_size = kAllowedImageSizes[static_cast<std::size_t>(image)];
     saveOperatorPreferencesAtomic(state->preferences_path, state->preferences);
     EndDialog(dialog, IDOK);
@@ -997,6 +1003,7 @@ void createControls(LauncherWindow& state) {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     state.spanish = state.preferences.language == UiLanguage::Spanish;
     state.dark = state.preferences.theme == ThemeMode::Dark;
+    state.pose_requires_person = state.preferences.pose_requires_person;
     state.preferences.show_window = true;
     applyTheme(state);
 
@@ -1196,6 +1203,12 @@ void loadEnv(LauncherWindow& state) {
         }
         state.preferences.ppe_class_confidences.fill(static_cast<float>(selection) / 100.0F);
     }
+    if (const auto pose_person_gate = envValue(values, L"POSE_PERSON_GATE")) {
+        if (*pose_person_gate != L"0" && *pose_person_gate != L"1") {
+            throw std::invalid_argument("POSE_PERSON_GATE must be 0 or 1");
+        }
+        state.pose_requires_person = *pose_person_gate == L"1";
+    }
     const auto ppe_imgsz = envValue(values, L"PPE_IMGSZ");
     const auto pose_imgsz = envValue(values, L"POSE_IMGSZ");
     if (ppe_imgsz || pose_imgsz) {
@@ -1334,6 +1347,7 @@ LauncherSettings readSettings(const LauncherWindow& state) {
     settings.output = editText(state.output);
     settings.analytics_mode = state.analytics_mode;
     settings.compute_mode = state.compute_mode;
+    settings.pose_requires_person = state.pose_requires_person;
     settings.managed_model_root = state.managed_model_root;
     // Lets Validate/Start search ordered dev candidate roots when the stored
     // root has no complete set. The installed bundle path stays strict.
@@ -1368,6 +1382,7 @@ void persistPreferences(LauncherWindow& state) {
     state.preferences.language = state.spanish ? UiLanguage::Spanish : UiLanguage::English;
     state.preferences.theme = state.dark ? ThemeMode::Dark : ThemeMode::Light;
     state.preferences.show_window = true;
+    state.preferences.pose_requires_person = state.pose_requires_person;
     saveOperatorPreferencesAtomic(state.preferences_path, state.preferences);
 }
 

@@ -150,7 +150,7 @@ manifest, contrato tensorial y proveedor antes de procesar frames.
 | `ANALYTICS_MODE` | `ppe-fall` | `ppe-only` o `ppe-fall`; `--mode` prevalece. |
 | `PPE_CONF` | `0.48` | Confianza mínima EPP. |
 | `POSE_CONF` | `0.55` | Confianza mínima pose; se ignora en `ppe-only`. |
-| `POSE_PERSON_GATE` | `0` | `1` ejecuta pose solo cuando PPE detectó al menos una persona; desactiva los solapamientos PPE/pose. |
+| `POSE_PERSON_GATE` | `1` | `1` descarta pose cuando PPE no detecta personas. Omite inferencia en rutas seriales y micro-batches; en rutas solapadas pose se ejecuta especulativamente. `0` conserva pose en todos los frames. |
 | `IOU_THRESHOLD` | `0.5` | Umbral NMS compartido. |
 | `TARGET_INFERENCE_FPS` | `0` | `0` procesa cada frame reciente; positivo limita inicios. |
 

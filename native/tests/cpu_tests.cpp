@@ -5,6 +5,7 @@
 #include "cuajone/analytics_pipeline.hpp"
 #include "cuajone/byte_tracker.hpp"
 #include "cuajone/contracts.hpp"
+#include "cuajone/engine_pipeline.hpp"
 #include "cuajone/fall_analytics.hpp"
 #include "cuajone/ppe_analytics.hpp"
 #include "cuajone/preprocess.hpp"
@@ -490,9 +491,17 @@ void testCliUrlsAndInvariantDefense() {
             && defaults.video_acceleration == VideoAcceleration::Auto
             && defaults.capture_read_timeout == std::chrono::milliseconds(3000)
             && defaults.evidence_writer_queue_capacity == 8
+            && defaults.pose_requires_person
             && defaults.ppe_confidence == 0.10F
             && defaults.ppe_class_confidences[0] == 0.10F,
         "Stable capture and asynchronous evidence defaults changed");
+    auto pose_gate_disabled = base;
+    pose_gate_disabled.push_back("--no-pose-person-gate");
+    require(!parse(pose_gate_disabled).pose_requires_person,
+        "CLI did not allow the explicit diagnostic pose-gate override");
+    pose_gate_disabled.push_back("--pose-person-gate");
+    require(parse(pose_gate_disabled).pose_requires_person,
+        "CLI pose-person-gate did not honor the last explicit setting");
     auto vaapi = base;
     vaapi.insert(vaapi.end(), {"--video-acceleration", "vaapi"});
     require(parse(vaapi).video_acceleration == VideoAcceleration::Vaapi,
@@ -672,6 +681,8 @@ void testPerformanceTelemetry() {
     }
     telemetry.addSample(PerformanceStage::PipelineTotal, std::chrono::milliseconds(17));
     telemetry.addSample(PerformanceStage::PoseInference, std::chrono::milliseconds(13));
+    telemetry.poseInferenceExecuted(3);
+    telemetry.poseInferenceSkippedByPersonGate(1);
     telemetry.capturedFrame();
     telemetry.displayedFrame();
     telemetry.processedFrame();
@@ -704,8 +715,14 @@ void testPerformanceTelemetry() {
             && overlay.video_codec == "H.264" && overlay.capture_backend == "FFMPEG"
             && overlay.video_acceleration == "D3D11" && overlay.frame_width == 1920
             && overlay.frame_height == 1080 && overlay.pipeline_p50_ms == 17.0
-            && overlay.pose_inference_p50_ms == 13.0,
+            && overlay.pose_inference_p50_ms == 13.0
+            && overlay.pose_executed_frames == 3
+            && overlay.pose_skipped_person_gate_frames == 1
+            && overlay.pose_person_gate_savings_percent == 25.0,
         "Capture metadata or overlay latency metrics were not retained");
+    require(report.find("\"pose_inference_executed_frames\":3") != std::string::npos
+            && report.find("\"pose_inference_skipped_person_gate_frames\":1") != std::string::npos,
+        "Pose gate telemetry counters were not serialized");
     require(performanceSourceMode("rtsp://secret@example/live") == "rtsp"
             && performanceSourceMode("frame.JPG") == "image"
             && performanceSourceMode("archive.mp4") == "video",
@@ -716,11 +733,15 @@ void testPerformanceTelemetry() {
     runBenchmarkIterations(2, 3, telemetry, [&](std::size_t iteration) {
         benchmark_calls.push_back(iteration);
         telemetry.addSample(PerformanceStage::PpeInference, std::chrono::milliseconds(10 + iteration));
+        if (iteration % 2 == 0) telemetry.poseInferenceExecuted();
+        else telemetry.poseInferenceSkippedByPersonGate();
         telemetry.processedFrame();
     });
     const std::string benchmark_report = telemetry.jsonReport();
     require(benchmark_calls == std::vector<std::size_t>{0, 1, 2, 3, 4}
             && benchmark_report.find("\"processed_frames\":3") != std::string::npos
+            && benchmark_report.find("\"pose_inference_executed_frames\":2") != std::string::npos
+            && benchmark_report.find("\"pose_inference_skipped_person_gate_frames\":1") != std::string::npos
             && benchmark_report.find("\"ppe_inference\":{\"samples\":3,\"p50_ms\":13.000,\"p95_ms\":14.000,\"p99_ms\":14.000,\"max_ms\":14.000}") != std::string::npos,
         "Benchmark warmup reset did not retain exactly the measured calls");
     require(benchmark_report.find("\"benchmark\":{\"warmup_iterations\":2,\"measured_iterations\":3,\"image_width\":640,\"image_height\":480,\"retained_sample_capacity\":256,\"retained_sample_count\":3}") != std::string::npos,
@@ -739,6 +760,22 @@ void testPerformanceTelemetry() {
             && !progress[2].warmup_complete
             && progress[2].completed_measured_frames == 20,
         "Benchmark progress did not report the completed warmup and ten-frame boundaries");
+}
+
+void testPosePersonGateDecision() {
+    const std::array<int, 1> person_ids{1};
+    const std::array<Detection, 0> empty{};
+    const std::array<Detection, 1> non_person{{{{0, 0, 10, 10}, 0.9F, 6}}};
+    const std::array<Detection, 1> person{{{{0, 0, 10, 10}, 0.9F, 1}}};
+    require(!shouldRunPoseInference(false, true, person, person_ids),
+        "PPE-only attempted to schedule an unloaded pose model");
+    require(shouldRunPoseInference(true, false, empty, person_ids),
+        "Disabled person gate did not preserve the every-frame pose path");
+    require(!shouldRunPoseInference(true, true, empty, person_ids)
+            && !shouldRunPoseInference(true, true, non_person, person_ids),
+        "Person gate scheduled pose without a PPE person detection");
+    require(shouldRunPoseInference(true, true, person, person_ids),
+        "Person gate suppressed pose when PPE detected a person");
 }
 
 void testCanonicalRenderDecision() {
@@ -1397,6 +1434,7 @@ int main() {
         {"pose decode", testPoseSchemaAndDecode},
         {"CLI URLs and invariants", testCliUrlsAndInvariantDefense},
         {"performance telemetry", testPerformanceTelemetry},
+        {"pose person gate decision", testPosePersonGateDecision},
         {"canonical render decision", testCanonicalRenderDecision},
         {"compute selection and probe contract", testComputeSelectionAndProbeContract},
         {"runtime execution planning", testRuntimeExecutionPlanning},

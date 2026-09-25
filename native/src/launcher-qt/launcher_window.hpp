@@ -82,6 +82,7 @@ private:
     QFile log_file_;
     cuajone::launcher::OperatorPreferences preferences_;
     cuajone::launcher::ComputeMode compute_mode_{cuajone::launcher::ComputeMode::Auto};
+    bool pose_requires_person_{true};
     bool telemetry_enabled_{};
     int telemetry_interval_seconds_{5};
     bool preflight_running_{};

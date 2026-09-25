@@ -84,6 +84,9 @@ struct OverlayMetrics {
     double pipeline_p50_ms{};
     double ppe_inference_p50_ms{};
     double pose_inference_p50_ms{};
+    std::uint64_t pose_executed_frames{};
+    std::uint64_t pose_skipped_person_gate_frames{};
+    double pose_person_gate_savings_percent{};
     std::string video_codec;
     std::string capture_backend;
     std::string video_acceleration;
@@ -106,6 +109,8 @@ public:
     void capturedFrame();
     void displayedFrame();
     void processedFrame();
+    void poseInferenceExecuted(std::size_t frame_count = 1);
+    void poseInferenceSkippedByPersonGate(std::size_t frame_count = 1);
     void recordLatestSlotSequence(std::uint64_t previous_sequence, std::uint64_t latest_sequence);
     void recordCaptureWaitTimeout();
     void skippedForTargetFps();

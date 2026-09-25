@@ -342,6 +342,7 @@ RuntimeConfig parseCommandLine(int argc, char** argv) {
         else if (option == "--show") config.show_window = true;
         else if (option == "--allow-nonperson-pose-class") config.allow_nonperson_pose_class = true;
         else if (option == "--pose-person-gate") config.pose_requires_person = true;
+        else if (option == "--no-pose-person-gate") config.pose_requires_person = false;
         else if (option == "--mode") config.analytics_mode = parseAnalyticsMode(requireValue(index, argc, argv, option));
         else if (option == "--source") {
             config.sources.push_back({requireValue(index, argc, argv, option)});
@@ -479,7 +480,8 @@ void printHelp(std::ostream& output) {
         "  --pose-class-count <number>  Pose classes fallback (default: 1)\n"
         "  --pose-kpt-shape <count,dim> Pose schema fallback (default: 17,3)\n"
         "  --allow-nonperson-pose-class Allow non-person single-class pose metadata\n"
-        "  --pose-person-gate           Run pose only when PPE detected a person\n\n"
+        "  --pose-person-gate           Run pose only when PPE detected a person (default)\n"
+        "  --no-pose-person-gate        Run pose on every frame (diagnostic fallback)\n\n"
         "Core thresholds:\n"
         "  --imgsz <size>               Inference size: 640, 768, 960, or 1280 (default: 640)\n"
         "  --ppe-conf <0..1>            PPE confidence (default: 0.10)\n"

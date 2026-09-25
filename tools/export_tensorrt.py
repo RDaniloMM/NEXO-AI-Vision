@@ -18,7 +18,6 @@ MANIFEST_VERSION = 1
 class ExportError(RuntimeError):
     pass
 
-
 def parse_imgsz(values: list[int]) -> int | tuple[int, int]:
     if len(values) == 1 and values[0] > 0:
         return values[0]
