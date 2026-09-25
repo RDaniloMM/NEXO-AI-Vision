@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "NexoAI Vision — Arquitectura del proyecto",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/RDaniloMM/NEXO-AI-Vision",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "3b178afa5aaa80c80e507284e89dc1b3f84497c4"
+    },
+    "viewBox": [1320, 760]
+  },
+  "components": [
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "Operador",
+      "sublabel": "Launcher Qt multiplataforma",
+      "sources": [{ "path": "native/src/launcher/launcher.cpp", "label": "interfaz del launcher" }],
+      "pos": [40, 300],
+      "size": [150, 70]
+    },
+    {
+      "id": "camera",
+      "type": "external",
+      "label": "Cámara o video",
+      "sublabel": "Entrada RTSP / archivo",
+      "sources": [{ "path": "native/src/runtime/capture.cpp", "label": "captura" }],
+      "pos": [40, 500],
+      "size": [150, 70]
+    },
+    {
+      "id": "launcher",
+      "type": "frontend",
+      "label": "Launcher de escritorio",
+      "sublabel": "Qt / Windows + Linux",
+      "sources": [{ "path": "native/src/launcher-qt/main.cpp", "label": "launcher Qt" }],
+      "pos": [250, 300],
+      "size": [190, 70]
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "NexoAIVision.exe",
+      "sublabel": "Runtime C++ multiplataforma",
+      "sources": [{ "path": "native/src/app/main.cpp", "label": "punto de entrada" }],
+      "pos": [500, 300],
+      "size": [190, 70]
+    },
+    {
+      "id": "planner",
+      "type": "backend",
+      "label": "Planificador de ejecución",
+      "sublabel": "Auto / CUDA / CPU + preflight",
+      "sources": [{ "path": "native/include/cuajone/runtime_execution_plan.hpp", "label": "plan de ejecución" }],
+      "pos": [760, 180],
+      "size": [190, 70]
+    },
+    {
+      "id": "inference",
+      "type": "backend",
+      "label": "Pipeline nativo de inferencia",
+      "sublabel": "Preprocesar, inferir, decodificar",
+      "sources": [{ "path": "native/include/cuajone/engine_pipeline.hpp", "label": "pipeline de inferencia" }],
+      "pos": [760, 360],
+      "size": [190, 70]
+    },
+    {
+      "id": "models",
+      "type": "external",
+      "label": "Bundle administrado de modelos",
+      "sublabel": "ONNX / TensorRT + manifiestos",
+      "sources": [{ "path": "native/src/runtime/model_manifest.cpp", "label": "manifiesto de modelo" }],
+      "pos": [1040, 150],
+      "size": [200, 70]
+    },
+    {
+      "id": "analytics",
+      "type": "backend",
+      "label": "Analítica de seguridad",
+      "sublabel": "EPP, tracking, caídas, eventos",
+      "sources": [{ "path": "native/include/cuajone/analytics_pipeline.hpp", "label": "pipeline analítico" }],
+      "pos": [1040, 360],
+      "size": [200, 70]
+    },
+    {
+      "id": "evidence",
+      "type": "database",
+      "label": "Evidencias y logs",
+      "sublabel": "JPEG, CSV/JSONL, ProgramData",
+      "sources": [{ "path": "native/src/runtime/evidence.cpp", "label": "escritor de evidencias" }],
+      "pos": [1040, 560],
+      "size": [200, 70]
+    },
+    {
+      "id": "build",
+      "type": "backend",
+      "label": "Pipeline de build y MSI",
+      "sublabel": "CMake + WiX + Linux",
+      "sources": [{ "path": "installer/native/build-installer.ps1", "label": "build del instalador" }],
+      "pos": [250, 90],
+      "size": [190, 70]
+    },
+    {
+      "id": "toolchain",
+      "type": "external",
+      "label": "Toolchain nativo fijado",
+      "sublabel": "MSVC / GCC + CUDA + OpenCV",
+      "sources": [{ "path": "native/activate-native.ps1", "label": "activación del toolchain" }],
+      "pos": [40, 90],
+      "size": [170, 70]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+    "label": "Hosts soportados: Windows y Linux",
+      "wraps": ["operator", "camera", "launcher", "runtime", "planner", "inference", "models", "analytics", "evidence"]
+    },
+    {
+      "kind": "region",
+    "label": "Build multiplataforma del repositorio",
+      "wraps": ["toolchain", "build"]
+    }
+  ],
+  "connections": [
+    { "id": "operator-launcher", "from": "operator", "to": "launcher", "label": "configurar / validar / iniciar", "variant": "emphasis", "labelDy": 59 },
+    { "id": "camera-runtime", "from": "camera", "to": "runtime", "label": "frames vía RTSP o archivo", "variant": "dashed" },
+    { "id": "launcher-runtime", "from": "launcher", "to": "runtime", "label": "proceso hermano + plan CLI", "variant": "emphasis", "labelDy": -29 },
+    { "id": "runtime-planner", "from": "runtime", "to": "planner", "label": "preflight y selección de backend", "fromSide": "top", "toSide": "left", "labelDy": -70 },
+    { "id": "runtime-inference", "from": "runtime", "to": "inference", "label": "plan de ejecución seleccionado", "labelDy": 60, "labelDx": -40 },
+    { "id": "models-inference", "from": "models", "to": "inference", "label": "artefactos de modelos verificados", "fromSide": "bottom", "toSide": "top" },
+    { "id": "inference-analytics", "from": "inference", "to": "analytics", "label": "detecciones y poses", "labelDy": 59 },
+    { "id": "analytics-evidence", "from": "analytics", "to": "evidence", "label": "eventos canónicos + frames anotados", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "runtime-evidence", "from": "runtime", "to": "evidence", "label": "logs y salida persistente", "variant": "dashed", "fromSide": "bottom", "toSide": "left" },
+    { "id": "toolchain-build", "from": "toolchain", "to": "build", "label": "compilación y empaquetado", "variant": "security", "labelDy": 59 },
+    { "id": "build-launcher", "from": "build", "to": "launcher", "label": "launcher staged", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "labelDx": 150 },
+    { "id": "build-runtime", "from": "build", "to": "runtime", "label": "runtime staged / MSI", "variant": "dashed", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Flujo del runtime",
+      "items": ["El launcher inicia el runtime nativo hermano", "El preflight elige Auto, CUDA o CPU", "La captura alimenta un único flujo acotado de latest-frame"]
+    },
+    {
+      "dot": "emerald",
+      "title": "Contrato analítico",
+      "items": ["El pipeline de inferencia preprocesa y decodifica", "La analítica combina tracking, EPP, pose y estado de caída", "Las evidencias se escriben en modo append-only con IDs de evento canónicos"]
+    },
+    {
+      "dot": "violet",
+      "title": "Límite de build",
+      "items": ["Repositorio: https://github.com/RDaniloMM/NEXO-AI-Vision", "El toolchain permanece fuera de Git en .tools/native", "Los scripts de aprovisionamiento fijan descargas y hashes", "WiX prepara el payload aprobado sin commitear binarios MSI"]
+    }
+  ]
+}
