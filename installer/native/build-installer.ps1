@@ -149,6 +149,7 @@ $signatureVerifier = Join-Path $scriptRoot "sign-release.ps1"
 $packageVerifier = Join-Path $scriptRoot "test-installer.ps1"
 $payloadPolicy = Join-Path $scriptRoot "payload-policy.ps1"
 $releaseGates = Join-Path $scriptRoot "release-gates.ps1"
+$outputRetention = Join-Path $scriptRoot "output-retention.ps1"
 $sourceRepository = "https://github.com/jeanpaulandradeleiva-crypto/CAMARAS-IP-CUAJONE"
 $upgradeCode = "88A886C2-8F6D-4669-B6FB-7DFC1E7B0397"
 $onnxRuntimeVersion = "1.25.0"
@@ -855,9 +856,11 @@ Assert-File $signatureVerifier "Authenticode signing helper"
 Assert-File $packageVerifier "MSI verification helper"
 Assert-File $payloadPolicy "Installer payload policy"
 Assert-File $releaseGates "Release parity gate"
+Assert-File $outputRetention "Installer output retention helper"
 Assert-File (Join-Path $projectRoot "LICENSE") "Project AGPL license"
 . $payloadPolicy
 . $releaseGates
+. $outputRetention
 
 $gitHead = (& git -C $projectRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $gitHead -notmatch '^[0-9a-f]{40}$') {
@@ -2056,6 +2059,17 @@ if ($isInternalPilotSigning) {
     $verificationParameters.PilotRootCertificatePath = $env:NEXOAI_PILOT_ROOT_CER
 }
 $verification = & $packageVerifier @verificationParameters
+
+# Retention is deliberately the last mutating step: a successful verifier must
+# return the exact run it completed before any historical output is removed.
+if (-not $StageOnly -and $null -ne $verification -and
+    -not [string]::IsNullOrWhiteSpace([string]$verification.acceptanceRoot)) {
+    Remove-VerifiedInstallerHistory -ToolRoot $ToolRoot `
+        -SupersededRoot $SupersededOutputDir `
+        -VerificationRoot $VerificationRoot `
+        -CurrentInstaller $installerPath `
+        -VerifiedRunRoot ([string]$verification.acceptanceRoot)
+}
 
 $signature = Get-AuthenticodeSignature -LiteralPath $installerPath
 [pscustomobject]@{
